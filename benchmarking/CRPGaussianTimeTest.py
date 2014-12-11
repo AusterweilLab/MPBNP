@@ -2,13 +2,15 @@
 #-*-coding: utf-8 -*-
 
 from __future__ import print_function
-from MPCRPGaussianSampler import *
-import argparse, sys
+import argparse, sys, os.path
+pkg_dir = os.path.dirname(os.path.realpath(__file__)) + '/../'
+sys.path.append(pkg_dir)
+
+from CRPGaussianSamplers import *
 import numpy as np
 import pyopencl as cl
 from time import time
 from datetime import datetime
-import re
 
 def print_args_summary(args):
     summary = "Running the sampler with the following arguments:\n"
@@ -21,7 +23,7 @@ def print_args_summary(args):
     print(summary, file=sys.stderr)
 
 parser = argparse.ArgumentParser(description="""
-A test unit for automatically assesing the computation time of the MPCRPGaussianMixtureSampler program with and without OpenCL support.
+A test unit for automatically assesing the computation time of the CRP Gaussian Sampler with and without OpenCL support.
 Contact Ting Qian <ting_qian@brown.edu> for questions and feedback.
 """)
 parser.add_argument('--iter', '-t', type=int, default=100, help='The number of iterations the sampler should run')
@@ -36,16 +38,15 @@ parser.add_argument('--repeat', type=int, default=1, help='The number of times t
 args = parser.parse_args()
 print_args_summary(args)
 
+c = CRPGaussianCollapsedGibbs(cl_mode = args.opencl)
+
 if args.opencl:
-    c = MPCRPGaussianMixtureSampler(cl_mode = True, inference_mode = True)
     device = c.ctx.get_info(cl.context_info.DEVICES)[0]
     device_type = device.type
     device_platform = device.platform.name.replace('\x00', '').strip()
     device_name = device.name.replace('\x00', '').strip()
     device_vendor = device.vendor.replace('\x00', '').strip()
     device_max_cu = device.max_compute_units
-else:
-    c = MPCRPGaussianMixtureSampler(cl_mode = False, inference_mode = True)
 
 if args.output_to_file is False: 
     file_dest = sys.stdout
@@ -71,9 +72,6 @@ for r in xrange(args.repeat):
             else:
                 data = np.vstack((data, np.random.multivariate_normal([i*10 + 1] * args.dim, np.identity(args.dim), max(data_size / args.cluster_num, data_size - data.shape[0]))))
 
-        sample_size = data.shape[0]
-        init_labels = np.random.randint(low = 0, high = min(sample_size, 10), size = sample_size)
-        
         c.direct_read_obs(data)
         c.set_sampling_params(niter = args.iter)
         gpu_time, total_time, _ = c.do_inference()
