@@ -1,6 +1,7 @@
 #!/usr/bin/env python2
 #-*- coding: utf-8 -*-
 
+from __future__ import print_function
 import pyopencl as cl, numpy as np
 import pyopencl.array
 import sys, copy, random, math, csv, gzip, mimetypes, os.path
@@ -34,6 +35,13 @@ def sample(a, p):
         if total > r:
             return a[i]
     return a[i]
+
+def print_matrix_in_row(npmat, file_dest):
+    """Print a matrix in a row.
+    """
+    row, col = npmat.shape
+    print(col, *npmat.reshape((1, row * col))[0], sep=',', file=file_dest)
+    return True
 
 class BaseSampler:
 

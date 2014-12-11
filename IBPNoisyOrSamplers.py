@@ -82,6 +82,10 @@ class IBPNoisyOrGibbs(BaseSampler):
             cur_y = self._infer_y(cur_y, cur_z)
             cur_y, cur_z = self._infer_z(cur_y, cur_z)
             #self._sample_lam(cur_y, cur_z)
+            if output_y_file is not None and i >= self.burnin: 
+                print_matrix_in_row(cur_y, output_y_file)
+            if output_z_file is not None and i >= self.burnin: 
+                print_matrix_in_row(cur_z, output_z_file)
 
         return -1, time() - a_time, None
 
@@ -109,6 +113,10 @@ class IBPNoisyOrGibbs(BaseSampler):
         y_on_log_prob += on_loglik
         y_off_log_prob += off_loglik
 
+        ew_max = np.maximum(y_on_log_prob, y_off_log_prob)
+        y_on_log_prob -= ew_max
+        y_off_log_prob -= ew_max
+        
         # normalize
         y_on_prob = np.exp(y_on_log_prob) / (np.exp(y_on_log_prob) + np.exp(y_off_log_prob))
         cur_y = np.random.binomial(1, y_on_prob)
@@ -261,6 +269,10 @@ class IBPNoisyOrGibbs(BaseSampler):
             cur_z = self._cl_infer_z(cur_y, cur_z, d_obs)
             gpu_time += time() - a_time
             cur_y, cur_z = self._cl_infer_k_new(cur_y, cur_z)
+            if output_y_file is not None and i >= self.burnin: 
+                print_matrix_in_row(cur_y, output_y_file)
+            if output_z_file is not None and i >= self.burnin: 
+                print_matrix_in_row(cur_z, output_z_file)
             total_time += time() - a_time
 
         return gpu_time, total_time, None
@@ -337,7 +349,7 @@ if __name__ == '__main__':
     argv = sys.argv
     N_ITER = 1000
     obs = np.hstack((np.random.normal(1, 1, 81), np.random.normal(20, 1, 81), np.random.normal(10,1,300)))
-    ibp_sampler = IBPNoisyOrGibbs(cl_mode = True)
+    ibp_sampler = IBPNoisyOrGibbs(cl_mode = False)
     ibp_sampler.read_csv('./data/ibp-image.csv')
     ibp_sampler.set_sampling_params(niter = N_ITER)
 
