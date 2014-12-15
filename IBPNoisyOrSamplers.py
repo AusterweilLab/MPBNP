@@ -2,6 +2,10 @@
 #-*- coding: utf-8 -*-
 
 from __future__ import print_function
+import sys, os.path
+pkg_dir = os.path.dirname(os.path.realpath(__file__)) + '/./'
+sys.path.append(pkg_dir)
+
 import pyopencl.array
 from collections import Counter
 from BaseSampler import *
@@ -18,7 +22,7 @@ class IBPNoisyOrGibbs(BaseSampler):
         BaseSampler.__init__(self, cl_mode, inference_mode, cl_device)
 
         if cl_mode:
-            program_str = open('kernels/ibp_noisyor_cl.c', 'r').read()
+            program_str = open(pkg_dir + './kernels/ibp_noisyor_cl.c', 'r').read()
             #utilities_str = open('kernels/utilities_cl.c', 'r').read()
             self.prg = cl.Program(self.ctx, program_str).build()
             #self.util = cl.Program(self.ctx, utilities_str).build()
@@ -344,15 +348,3 @@ class IBPNoisyOrGibbs(BaseSampler):
         
         return cur_y_new, cur_z_new
 
-if __name__ == '__main__':
-
-    argv = sys.argv
-    N_ITER = 1000
-    obs = np.hstack((np.random.normal(1, 1, 81), np.random.normal(20, 1, 81), np.random.normal(10,1,300)))
-    ibp_sampler = IBPNoisyOrGibbs(cl_mode = False)
-    ibp_sampler.read_csv('./data/ibp-image.csv')
-    ibp_sampler.set_sampling_params(niter = N_ITER)
-
-    gpu_time, total_time, common_clusters = ibp_sampler.do_inference()
-    print('GPU time %f seconds; Total time %f seconds' % (gpu_time, total_time), file=sys.stderr)
-    
