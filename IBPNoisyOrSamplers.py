@@ -16,7 +16,7 @@ np.set_printoptions(suppress=True)
 class IBPNoisyOrGibbs(BaseSampler):
 
     def __init__(self, cl_mode = True, inference_mode = True, cl_device = None,
-                 alpha = 2.0, lam = 0.95, theta = 0.5, epislon = 0.01, init_k = 4):
+                 alpha = 2.0, lam = 0.95, theta = 0.25, epislon = 0.01, init_k = 4):
         """Initialize the class.
         """
         BaseSampler.__init__(self, cl_mode, inference_mode, cl_device)
@@ -141,10 +141,12 @@ class IBPNoisyOrGibbs(BaseSampler):
         # add loglikelihood of data
         for row in xrange(cur_z.shape[0]):
             for col in xrange(cur_z.shape[1]):
+                old_value = cur_z[row, col]
                 cur_z[row, col] = 1
                 on_prob[row, col] = on_prob[row, col] * np.exp(self._loglik_nth(cur_y, cur_z, n = row))
                 cur_z[row, col] = 0
                 off_prob[row, col] = off_prob[row, col] * np.exp(self._loglik_nth(cur_y, cur_z, n = row))
+                cur_z[row, col] = old_value
 
         # normalize the probability
         on_prob = on_prob / (on_prob + off_prob)

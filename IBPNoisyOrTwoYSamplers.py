@@ -13,10 +13,10 @@ from scipy.stats import poisson
 
 np.set_printoptions(suppress=True)
 
-class IBPNoisyOrTwoYGibbs(BaseSampler):
+class IBPNoisyOrTwoYBiasedGibbs(BaseSampler):
 
     def __init__(self, cl_mode = True, inference_mode = True, cl_device = None,
-                 alpha = 2.0, lam = 0.95, theta = 0.5, epislon = 0.01, init_k = 1):
+                 alpha = 2.0, lam = 0.95, theta = 0.15, epislon = 0.05, init_k = 2):
         """Initialize the class.
         """
         BaseSampler.__init__(self, cl_mode, inference_mode, cl_device)
@@ -102,8 +102,9 @@ class IBPNoisyOrTwoYGibbs(BaseSampler):
             print('Y:', cur_y, sep='\n', file=sys.stderr)
             print('Z:', cur_z, sep='\n', file=sys.stderr)
             print('F:', cur_f, sep='\n', file=sys.stderr)
+            print('DATA:', self.obs, sep='\n', file=sys.stderr)
+            cur_y, cur_z, cur_f = self._infer_f(cur_y, cur_z, cur_f)
             cur_y = self._infer_y(cur_y, cur_z, cur_f)
-            cur_z, cur_f = self._infer_f(cur_y, cur_z, cur_f)
             cur_y, cur_z, cur_f = self._infer_z(cur_y, cur_z, cur_f)
 
             raw_input()
@@ -113,6 +114,12 @@ class IBPNoisyOrTwoYGibbs(BaseSampler):
                 print_matrix_in_row(cur_y, output_y_file)
             if output_z_file is not None and i >= self.burnin: 
                 print_matrix_in_row(cur_z, output_z_file)
+
+
+        print('Y:', cur_y, sep='\n', file=sys.stderr)
+        print('Z:', cur_z, sep='\n', file=sys.stderr)
+        print('F:', cur_f, sep='\n', file=sys.stderr)
+        print('DATA:', self.obs, sep='\n', file=sys.stderr)
 
         return -1, time() - a_time, None
 
@@ -158,34 +165,50 @@ class IBPNoisyOrTwoYGibbs(BaseSampler):
     def _infer_f(self, cur_y, cur_z, cur_f):
         """Infer feature ownership matrix Z.
         """
-        N = float(len(self.obs))
-        z_col_sum = cur_z.sum(axis = 0)
-
-        # calculate the IBP prior on feature ownership for existing features
-        m_minus = z_col_sum - cur_z
-        active_prob = m_minus / N
-        inactive_prob = 1 - m_minus / N
-
         # add loglikelihood of data
-        for row in xrange(cur_f.shape[0]):
-            for col in xrange(cur_f.shape[1]):
-                prob_grid = np.array([inactive_prob[row, col], 
-                                      active_prob[row, col] * 0.5, 
-                                      active_prob[row, col] * 0.5]) # a uniform prior on choosing either 1 or 2 in F
+        for row in xrange(self.n):
+            z_col_sum = cur_z.sum(axis = 0)
 
+            # calculate the IBP prior on feature ownership for existing features
+            m_minus = z_col_sum - cur_z
+            active_prob = m_minus / float(self.n)
+            inactive_prob = 1 - m_minus / float(self.n)
+            
+            #print(cur_y, cur_z, cur_f, sep='\n-----\n')
+
+            for col in xrange(cur_f.shape[1]):
+                #print('row:', row, 'col:', col)
+                f_prior = [((cur_f == 1).sum() - int(cur_f[row,col] == 1) + .1) / ((cur_f > 0).sum() - int(cur_f[row,col] > 0) + .2),
+                           ((cur_f == 2).sum() - int(cur_f[row,col] == 2) + .1) / ((cur_f > 0).sum() - int(cur_f[row,col] > 0) + .2)]
+
+                prob_grid = np.array([inactive_prob[row, col], 
+                                      active_prob[row, col] * f_prior[0], 
+                                      active_prob[row, col] * f_prior[1]]) # a uniform prior on choosing either 1 or 2 in F
+
+                #print('priors:', prob_grid)
+                lik_grid = np.empty(3)
                 for i in xrange(3):
                     cur_f[row, col] = i
-                    prob_grid[i] = prob_grid[i] * np.exp(self._loglik_nth(cur_y, cur_z, cur_f, n = row))
-            
+                    cur_z[row, col] = int(i > 0)
+                    lik_grid[i] = np.exp(self._loglik_nth(cur_y, cur_z, cur_f, n = row))
+                    prob_grid[i] = prob_grid[i] * lik_grid[i]
+                    #print(i, np.exp(self._loglik_nth(cur_y, cur_z, cur_f, n = row)), file=sys.stderr)
+
+
                 # normalize the probability
                 prob_grid = prob_grid / prob_grid.sum()
+                #print('likelihoods:', lik_grid)
+                #print('posteriors:', prob_grid)
+                #raw_input()
                 cur_f[row, col] = np.random.choice(a = 3, p = prob_grid)
+                # set z accordingly
+                cur_z[row, col] = int(cur_f[row, col] > 0)
 
-        # set z accordingly
-        cur_z[np.where(cur_f == 0)] = 0
-        cur_z[np.where(cur_f > 0)] = 1
+            # sample new features
+            cur_y, cur_z, cur_f = self._sample_k_new(cur_y, cur_z, cur_f, row)
 
-        return cur_z, cur_f
+            #raw_input()
+        return cur_y, cur_z, cur_f
 
     def _infer_z(self, cur_y, cur_z, cur_f):
         """Sample new features use MH.
@@ -196,10 +219,6 @@ class IBPNoisyOrTwoYGibbs(BaseSampler):
 
         Therefore, _infer_z() is devoted to the sampling of new features.
         """
-        k_new = self._sample_k_new(cur_y, cur_z, cur_f)
-        if k_new:
-            cur_y, cur_z, cur_f = k_new
-
         # delete null features
         inactive_feat_col = np.where(cur_z.sum(axis = 0) == 0)
         cur_z = np.delete(cur_z, inactive_feat_col[0], axis=1)
@@ -212,44 +231,47 @@ class IBPNoisyOrTwoYGibbs(BaseSampler):
         
         return cur_y, cur_z, cur_f
 
-    def _sample_k_new(self, cur_y, cur_z, cur_f):
-        """Sample new features for all rows using Metropolis hastings.
-        (This is a heuristic strategy aiming for easy parallelization in an 
-        equivalent GPU implementation. We here have effectively treated the
-        current Z as a snapshot frozen in time, and each new k is based on
-        this frozen snapshot of Z. In a more correct procedure, we should
-        go through the rows and sample k new for each row given all previously
-        sampled new ks.)
+    def _sample_k_new(self, cur_y, cur_z, cur_f, n):
+        """Sample new features for the nth row of F (and Z)
         """
-        N = float(len(self.obs))
-        old_loglik = self._loglik(cur_y, cur_z, cur_f)
+        k_new_count = np.random.poisson(self.alpha / self.n)
+        if k_new_count == 0: return cur_y, cur_z, cur_f
 
-        k_new_count = np.random.poisson(self.alpha / N)
-        if k_new_count == 0: return False
+        # calculate the old logliklihood
+        old_loglik = self._loglik_nth(cur_y, cur_z, cur_f, n)
             
-        # modify the feature ownership matrix
-        cur_z_new = np.hstack((cur_z, np.zeros((cur_z.shape[0], k_new_count), dtype=np.int32)))
-        cur_z_new[:, [xrange(-k_new_count,0)]] = 1
+        f_prior = [((cur_f == 1).sum() + .01) / ((cur_f > 0).sum() + .02),
+                   ((cur_f == 2).sum() + .01) / ((cur_f > 0).sum() + .02)]
+
+        # create the new F vector
+        new_f = np.zeros((self.n, k_new_count), dtype = np.int32)
+        new_f[n, :k_new_count] = np.random.choice(a = [1, 2], p = f_prior, size = k_new_count)
+        cur_f_new = np.hstack((cur_f, new_f))
+        # create the new Z vector
+        cur_z_new = np.empty(cur_f_new.shape, dtype=np.int32)
+        cur_z_new[np.where(cur_f_new > 0)] = 1
+        cur_z_new[np.where(cur_f_new == 0)] = 0
         # propose feature images by sampling from the prior distribution
         cur_y_new = np.array([
                 np.vstack((cur_y[0], np.random.binomial(1, self.theta, (k_new_count, self.d)))),
                 np.vstack((cur_y[1], np.random.binomial(1, self.theta, (k_new_count, self.d))))
                 ])
-        # randomly set the indexing matrix F
-        cur_f_new = np.hstack((cur_f, np.random.randint(1, 3, (cur_z.shape[0], k_new_count))))
     
-        new_loglik = self._loglik(cur_y_new, cur_z_new, cur_f_new)
+        new_loglik = self._loglik_nth(cur_y_new, cur_z_new, cur_f_new, n)
+
         # normalization
         max_loglik = max(new_loglik, old_loglik)
         new_loglik -= max_loglik
         old_loglik -= max_loglik
         # sampling
-        move_prob = 1 / (1 + np.exp(old_loglik - new_loglik));
+        move_prob = 1 / (1 + np.exp(old_loglik - new_loglik))
         if random.random() < move_prob:
-            return cur_y_new.astype(np.int32), cur_z_new.astype(np.int32), cur_f_new.astype(np.int32)
-        return False
+            cur_y = cur_y_new
+            cur_z = cur_z_new
+            cur_f = cur_f_new
 
-
+        return cur_y, cur_z, cur_f
+        
     def _sample_lam(self, cur_y, cur_z):
         """Resample the value of lambda.
         """
@@ -296,10 +318,9 @@ class IBPNoisyOrTwoYGibbs(BaseSampler):
             y_comb[np.where(cur_f[each_n] == 2)] = cur_y[1][np.where(cur_f[each_n] == 2)]
             
             not_on_p = np.power(1. - self.lam, np.dot(cur_z[each_n], y_comb)) * (1. - self.epislon)
+
             loglik += np.log(np.abs(self.obs[each_n] - not_on_p)).sum()
 
-        #print(n, cur_y, cur_z, cur_f, loglik, sep="\n")
-        #raw_input()
         return loglik
 
     def _loglik(self, cur_y, cur_z, cur_f):
@@ -412,10 +433,58 @@ class IBPNoisyOrTwoYGibbs(BaseSampler):
         
         return cur_y_new, cur_z_new
 
+class IBPNoisyOrTwoYUniformGibbs(IBPNoisyOrTwoYBiasedGibbs):
+
+    def _infer_f(self, cur_y, cur_z, cur_f):
+        """Infer feature ownership matrix Z.
+        """
+        # add loglikelihood of data
+        for row in xrange(self.n):
+            z_col_sum = cur_z.sum(axis = 0)
+
+            # calculate the IBP prior on feature ownership for existing features
+            m_minus = z_col_sum - cur_z
+            active_prob = m_minus / float(self.n)
+            inactive_prob = 1 - m_minus / float(self.n)
+            
+            #print(cur_y, cur_z, cur_f, sep='\n-----\n')
+            
+            for col in xrange(cur_f.shape[1]):
+                #print('row:', row, 'col:', col)
+                prob_grid = np.array([inactive_prob[row, col], 
+                                      active_prob[row, col] * 0.5, 
+                                      active_prob[row, col] * 0.5]) # a uniform prior on choosing either 1 or 2 in F
+
+                #print('priors:', prob_grid)
+                lik_grid = np.empty(3)
+                for i in xrange(3):
+                    cur_f[row, col] = i
+                    cur_z[row, col] = int(i > 0)
+                    lik_grid[i] = np.exp(self._loglik_nth(cur_y, cur_z, cur_f, n = row))
+                    prob_grid[i] = prob_grid[i] * lik_grid[i]
+                    #print(i, np.exp(self._loglik_nth(cur_y, cur_z, cur_f, n = row)), file=sys.stderr)
+
+
+                # normalize the probability
+                prob_grid = prob_grid / prob_grid.sum()
+                #print('likelihoods:', lik_grid)
+                #print('posteriors:', prob_grid)
+                cur_f[row, col] = np.random.choice(a = 3, p = prob_grid)
+                # set z accordingly
+                cur_z[row, col] = int(cur_f[row, col] > 0)
+
+            # sample new features
+            cur_y, cur_z, cur_f = self._sample_k_new(cur_y, cur_z, cur_f, row)
+
+            #raw_input()
+        return cur_y, cur_z, cur_f
+    
+
 if __name__ == '__main__':
 
-    NITER = 100
-    ibp_sampler = IBPNoisyOrTwoYGibbs(cl_mode = False)
+    NITER = 200
+    #ibp_sampler = IBPNoisyOrTwoYUniformGibbs(cl_mode = False)
+    ibp_sampler = IBPNoisyOrTwoYBiasedGibbs(cl_mode = False)
     ibp_sampler.read_csv('./data/ibp-image-n4.csv')
     ibp_sampler.set_sampling_params(niter = NITER)
     ibp_sampler.do_inference()
