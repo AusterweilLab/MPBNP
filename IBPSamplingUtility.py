@@ -1,11 +1,15 @@
 #!/usr/bin/env python2
 #-*-coding: utf-8 -*-
-
 from __future__ import print_function
+
+import sys, os.path
+pkg_dir = os.path.dirname(os.path.realpath(__file__)) + '/../'
+sys.path.append(pkg_dir)
+
 import argparse, sys, csv, gzip, os.path
 import numpy as np
 import pyopencl as cl
-from IBPNoisyOrSamplers import IBPNoisyOrGibbs
+from MPBNP import ibp
 from time import time
 
 def print_args_summary(args):
@@ -48,7 +52,7 @@ output_path = os.path.dirname(os.path.realpath(args.data_file)) + '/'
 
 # set up the sampler
 if args.kernel == 'noisyor':
-    c = IBPNoisyOrGibbs(cl_mode = args.opencl, cl_device = args.opencl_device)
+    c = ibp.noisyor.Gibbs(cl_mode = args.opencl, cl_device = args.opencl_device)
 
 c.read_csv(args.data_file)
 c.set_sampling_params(niter = args.iter, burnin = args.burnin)

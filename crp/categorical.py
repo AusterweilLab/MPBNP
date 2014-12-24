@@ -1,14 +1,17 @@
-#!/usr/bin/env python2
 #-*- coding: utf-8 -*-
 
 from __future__ import print_function
+import sys, os.path
+pkg_dir = os.path.dirname(os.path.realpath(__file__)) + '/../../'
+sys.path.append(pkg_dir)
+
 import pyopencl.array
 from collections import Counter
-from BaseSampler import *
+from MPBNP import *
 
 np.set_printoptions(suppress=True)
 
-class CRPCategoricalCollapsedGibbs(BaseSampler):
+class CollapsedGibbs(BaseSampler):
 
     def __init__(self, cl_mode = True, inference_mode = True, alpha = 1.0, cl_device = None):
         """Initialize the class.
@@ -16,7 +19,7 @@ class CRPCategoricalCollapsedGibbs(BaseSampler):
         BaseSampler.__init__(self, cl_mode, inference_mode, cl_device)
 
         if cl_mode:
-            program_str = open('kernels/crp_categorical_cl.c', 'r').read()
+            program_str = open(pkg_dir + 'MPBNP/crp/kernels/crp_categorical_cl.c', 'r').read()
             self.prg = cl.Program(self.ctx, program_str).build()
 
         self.alpha = alpha 
@@ -197,8 +200,8 @@ class CRPCategoricalCollapsedGibbs(BaseSampler):
 if __name__ == '__main__':
 
     argv = sys.argv
-    crp_sampler = CRPCategoricalCollapsedGibbs(cl_mode = True)
-    crp_sampler.read_csv('./data/coin.csv')
+    crp_sampler = CollapsedGibbs(cl_mode = True)
+    crp_sampler.read_csv('../data/coin.csv')
     crp_sampler.set_sampling_params(niter = 1000, thining = 0, burnin = 0)
 
     gpu_time, total_time, most_common = crp_sampler.do_inference()

@@ -43,7 +43,7 @@ def print_matrix_in_row(npmat, file_dest):
     print(col, *npmat.reshape((1, row * col))[0], sep=',', file=file_dest)
     return True
 
-class BaseSampler:
+class BaseSampler(object):
 
     def __init__(self, cl_mode = True, inference_mode = True, cl_device = None):
         """Initialize the class.

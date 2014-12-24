@@ -3,20 +3,20 @@
 
 from __future__ import print_function
 import sys, os.path
-pkg_dir = os.path.dirname(os.path.realpath(__file__)) + '/./'
+pkg_dir = os.path.dirname(os.path.realpath(__file__)) + '/../../'
 sys.path.append(pkg_dir)
 
 import pyopencl.array
 from collections import Counter
-from BaseSampler import *
 from scipy.stats import poisson
+from MPBNP import *
 
 np.set_printoptions(suppress=True)
 
-class IBPNoisyOrTwoYBiasedGibbs(BaseSampler):
+class BiasedGibbs(BaseSampler):
 
     def __init__(self, cl_mode = True, inference_mode = True, cl_device = None,
-                 alpha = 2.0, lam = 0.95, theta = 0.15, epislon = 0.05, init_k = 2):
+                 alpha = 1.0, lam = 0.95, theta = 0.25, epislon = 0.05, init_k = 2):
         """Initialize the class.
         """
         BaseSampler.__init__(self, cl_mode, inference_mode, cl_device)
@@ -162,7 +162,7 @@ class IBPNoisyOrTwoYBiasedGibbs(BaseSampler):
 
         return cur_y
 
-    def _infer_f(self, cur_y, cur_z, cur_f):
+    def _infer_f(self, cur_y, cur_z, cur_f, f_prior=None):
         """Infer feature ownership matrix Z.
         """
         # add loglikelihood of data
@@ -178,8 +178,9 @@ class IBPNoisyOrTwoYBiasedGibbs(BaseSampler):
 
             for col in xrange(cur_f.shape[1]):
                 #print('row:', row, 'col:', col)
-                f_prior = [((cur_f == 1).sum() - int(cur_f[row,col] == 1) + .1) / ((cur_f > 0).sum() - int(cur_f[row,col] > 0) + .2),
-                           ((cur_f == 2).sum() - int(cur_f[row,col] == 2) + .1) / ((cur_f > 0).sum() - int(cur_f[row,col] > 0) + .2)]
+                if f_prior is None:
+                    f_prior = [((cur_f == 1).sum() - int(cur_f[row,col] == 1) + .1) / ((cur_f > 0).sum() - int(cur_f[row,col] > 0) + .2),
+                               ((cur_f == 2).sum() - int(cur_f[row,col] == 2) + .1) / ((cur_f > 0).sum() - int(cur_f[row,col] > 0) + .2)]
 
                 prob_grid = np.array([inactive_prob[row, col], 
                                       active_prob[row, col] * f_prior[0], 
@@ -433,58 +434,18 @@ class IBPNoisyOrTwoYBiasedGibbs(BaseSampler):
         
         return cur_y_new, cur_z_new
 
-class IBPNoisyOrTwoYUniformGibbs(IBPNoisyOrTwoYBiasedGibbs):
+class UniformGibbs(BiasedGibbs):
 
-    def _infer_f(self, cur_y, cur_z, cur_f):
+    def _infer_f(self, cur_y, cur_z, cur_f, f_prior=None):
         """Infer feature ownership matrix Z.
         """
-        # add loglikelihood of data
-        for row in xrange(self.n):
-            z_col_sum = cur_z.sum(axis = 0)
-
-            # calculate the IBP prior on feature ownership for existing features
-            m_minus = z_col_sum - cur_z
-            active_prob = m_minus / float(self.n)
-            inactive_prob = 1 - m_minus / float(self.n)
-            
-            #print(cur_y, cur_z, cur_f, sep='\n-----\n')
-            
-            for col in xrange(cur_f.shape[1]):
-                #print('row:', row, 'col:', col)
-                prob_grid = np.array([inactive_prob[row, col], 
-                                      active_prob[row, col] * 0.5, 
-                                      active_prob[row, col] * 0.5]) # a uniform prior on choosing either 1 or 2 in F
-
-                #print('priors:', prob_grid)
-                lik_grid = np.empty(3)
-                for i in xrange(3):
-                    cur_f[row, col] = i
-                    cur_z[row, col] = int(i > 0)
-                    lik_grid[i] = np.exp(self._loglik_nth(cur_y, cur_z, cur_f, n = row))
-                    prob_grid[i] = prob_grid[i] * lik_grid[i]
-                    #print(i, np.exp(self._loglik_nth(cur_y, cur_z, cur_f, n = row)), file=sys.stderr)
-
-
-                # normalize the probability
-                prob_grid = prob_grid / prob_grid.sum()
-                #print('likelihoods:', lik_grid)
-                #print('posteriors:', prob_grid)
-                cur_f[row, col] = np.random.choice(a = 3, p = prob_grid)
-                # set z accordingly
-                cur_z[row, col] = int(cur_f[row, col] > 0)
-
-            # sample new features
-            cur_y, cur_z, cur_f = self._sample_k_new(cur_y, cur_z, cur_f, row)
-
-            #raw_input()
-        return cur_y, cur_z, cur_f
-    
+        return super(UniformGibbs, self)._infer_f(cur_y, cur_z, cur_f, [0.5, 0.5])    
 
 if __name__ == '__main__':
 
     NITER = 200
     #ibp_sampler = IBPNoisyOrTwoYUniformGibbs(cl_mode = False)
-    ibp_sampler = IBPNoisyOrTwoYBiasedGibbs(cl_mode = False)
-    ibp_sampler.read_csv('./data/ibp-image-n4.csv')
+    ibp_sampler = BiasedGibbs(cl_mode = False)
+    ibp_sampler.read_csv(pkg_dir + 'MPBNP/data/ibp-image-n8.csv')
     ibp_sampler.set_sampling_params(niter = NITER)
     ibp_sampler.do_inference()

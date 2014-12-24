@@ -1,19 +1,18 @@
-#!/usr/bin/env python2
 #-*- coding: utf-8 -*-
 
 from __future__ import print_function
 import sys, os.path
-pkg_dir = os.path.dirname(os.path.realpath(__file__)) + '/./'
+pkg_dir = os.path.dirname(os.path.realpath(__file__)) + '/../../'
 sys.path.append(pkg_dir)
 
 import pyopencl.array
 from scipy.stats import t
 from collections import Counter
-from BaseSampler import *
+from MPBNP import *
 
 np.set_printoptions(suppress=True)
 
-class CRPGaussianCollapsedGibbs(BaseSampler):
+class CollapsedGibbs(BaseSampler):
 
     def __init__(self, cl_mode = True, inference_mode = True, alpha = 1.0, cl_device = None):
         """Initialize the class.
@@ -21,7 +20,7 @@ class CRPGaussianCollapsedGibbs(BaseSampler):
         BaseSampler.__init__(self, cl_mode, inference_mode, cl_device)
 
         if cl_mode:
-            program_str = open(pkg_dir + 'kernels/crp_cl.c', 'r').read()
+            program_str = open(pkg_dir + 'MPBNP/crp/kernels/crp_cl.c', 'r').read()
             self.prg = cl.Program(self.ctx, program_str).build()
 
         self.alpha = alpha
