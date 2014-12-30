@@ -33,7 +33,8 @@ Please contact Ting Qian <ting_qian@brown.edu> for questions and feedback.
 parser.add_argument('--opencl', action='store_true', help='Use OpenCL acceleration')
 parser.add_argument('--opencl_device', choices=['ask', 'gpu', 'cpu'], default='ask', help='The device to use OpenCL acceleration on. Default behavior is asking the user (i.e., you).')
 parser.add_argument('--data_file', type=str, required=True)
-parser.add_argument('--kernel', choices=['noisyor'], default='noisyor', help='The likelihood function of each feature. Default is noisyor for binary images.')
+parser.add_argument('--kernel', choices=['noisyor', 'noisyortwoy-uniform', 'noisyortwoy-biased'], 
+                    default='noisyor', help='The likelihood function of each feature. Default is noisyor for binary images.')
 parser.add_argument('--iter', '-t', type=int, default=10000, help='The number of iterations the sampler should run')
 parser.add_argument('--burnin', '-b', type=int, default=2000, help='The number of iterations discarded as burn-in.')
 parser.add_argument('--output_to_file', action='store_true', help="Write posterior samples to a log file in the current directory. Default behavior is not keeping records of posterior samples")
@@ -53,6 +54,10 @@ output_path = os.path.dirname(os.path.realpath(args.data_file)) + '/'
 # set up the sampler
 if args.kernel == 'noisyor':
     c = ibp.noisyor.Gibbs(cl_mode = args.opencl, cl_device = args.opencl_device)
+elif args.kernel == 'noisyortwoy-uniform':
+    c = ibp.noisyortwoy.UniformGibbs(cl_mode = args.opencl, cl_device = args.opencl_device)
+elif args.kernel == 'noisyortwoy-biased':
+    c = ibp.noisyortwoy.BiasedGibbs(cl_mode = args.opencl, cl_device = args.opencl_device)
 
 c.read_csv(args.data_file)
 c.set_sampling_params(niter = args.iter, burnin = args.burnin)
@@ -64,15 +69,25 @@ for chain in xrange(args.chain):
         if args.opencl:
             y_dest = gzip.open(output_path + input_filename + '-%d-%s-chain-%d-cl-Y.csv.gz' % (args.iter - args.burnin, args.kernel, chain + 1), 'w')
             z_dest = gzip.open(output_path + input_filename + '-%d-%s-chain-%d-cl-Z.csv.gz' % (args.iter - args.burnin, args.kernel, chain + 1), 'w')
+            if args.kernel.startswith('noisyortwoy'):
+                f_dest = gzip.open(output_path + input_filename + '-%d-%s-chain-%d-cl-F.csv.gz' % (args.iter - args.burnin, args.kernel, chain + 1), 'w')
+
         else:
             y_dest = gzip.open(output_path + input_filename + '-%d-%s-chain-%d-nocl-Y.csv.gz' % (args.iter - args.burnin, args.kernel, chain + 1), 'w')
             z_dest = gzip.open(output_path + input_filename + '-%d-%s-chain-%d-nocl-Z.csv.gz' % (args.iter - args.burnin, args.kernel, chain + 1), 'w')
+            if args.kernel.startswith('noisyortwoy'):
+                f_dest = gzip.open(output_path + input_filename + '-%d-%s-chain-%d-nocl-F.csv.gz' % (args.iter - args.burnin, args.kernel, chain + 1), 'w')
     elif args.output_to_stdout:
         y_dest = sys.stdout
         z_dest = sys.stdout
+        if args.kernel.startswith('noisyortwoy'):
+            f_dest = sys.stdout
     else:
-        y_dest, z_dest = None, None
+        y_dest, z_dest, f_dest = None, None, None
 
     print("Chain %d running, please wait ..." % (chain + 1), file=sys.stderr)
-    gpu_time, total_time, common_clusters = c.do_inference(output_y_file = y_dest, output_z_file = z_dest)
+    if args.kernel.startswith('noisyortwoy'):
+        gpu_time, total_time, common_clusters = c.do_inference(output_y_file = y_dest, output_z_file = z_dest, output_f_file = f_dest)
+    else:
+        gpu_time, total_time, common_clusters = c.do_inference(output_y_file = y_dest, output_z_file = z_dest)
     print("Chain %d finished. OpenCL device time: %f; Total_time: %f seconds\n" % (chain + 1, gpu_time, total_time), file=sys.stderr)

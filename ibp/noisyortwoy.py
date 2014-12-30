@@ -99,27 +99,17 @@ class BiasedGibbs(BaseSampler):
 
         a_time = time()
         for i in xrange(self.niter):
-            print('Y:', cur_y, sep='\n', file=sys.stderr)
-            print('Z:', cur_z, sep='\n', file=sys.stderr)
-            print('F:', cur_f, sep='\n', file=sys.stderr)
-            print('DATA:', self.obs, sep='\n', file=sys.stderr)
             cur_y, cur_z, cur_f = self._infer_f(cur_y, cur_z, cur_f)
             cur_y = self._infer_y(cur_y, cur_z, cur_f)
             cur_y, cur_z, cur_f = self._infer_z(cur_y, cur_z, cur_f)
-
-            raw_input()
 
             #self._sample_lam(cur_y, cur_z)
             if output_y_file is not None and i >= self.burnin: 
                 print_matrix_in_row(cur_y, output_y_file)
             if output_z_file is not None and i >= self.burnin: 
                 print_matrix_in_row(cur_z, output_z_file)
-
-
-        print('Y:', cur_y, sep='\n', file=sys.stderr)
-        print('Z:', cur_z, sep='\n', file=sys.stderr)
-        print('F:', cur_f, sep='\n', file=sys.stderr)
-        print('DATA:', self.obs, sep='\n', file=sys.stderr)
+            if output_f_file is not None and i >= self.burnin: 
+                print_matrix_in_row(cur_f, output_f_file)
 
         return -1, time() - a_time, None
 
@@ -441,11 +431,117 @@ class UniformGibbs(BiasedGibbs):
         """
         return super(UniformGibbs, self)._infer_f(cur_y, cur_z, cur_f, [0.5, 0.5])    
 
-if __name__ == '__main__':
+class UniformGibbsPredictor(BasePredictor):
 
-    NITER = 200
-    #ibp_sampler = IBPNoisyOrTwoYUniformGibbs(cl_mode = False)
-    ibp_sampler = BiasedGibbs(cl_mode = False)
-    ibp_sampler.read_csv(pkg_dir + 'MPBNP/data/ibp-image-n8.csv')
-    ibp_sampler.set_sampling_params(niter = NITER)
-    ibp_sampler.do_inference()
+    def __init__(self, cl_mode = True, cl_device = None,
+                 alpha = 1.0, lam = 0.95, theta = 0.25, epislon = 0.05, init_k = 4):
+        """Initialize the predictor.
+        """
+        BasePredictor.__init__(self, cl_mode = cl_mode, cl_device = cl_device)
+        self.alpha = alpha
+        self.lam = lam
+        self.theta = theta
+        self.epislon = epislon
+
+    def read_test_csv(self, file_path, header=True):
+        """Read the test cases and convert values to integer.
+        """
+        BasePredictor.read_test_csv(self, file_path, header)
+        self.obs = np.array(self.obs, dtype=np.int32)
+        return
+
+    def read_samples_csv(self, var_name, file_path, header = True):
+        """Read test data from a csv file.
+        """
+        BasePredictor.read_samples_csv(self, var_name, file_path, header)
+        new_samples = []
+        for sample in self.samples[var_name]:
+            if len(sample) > 1: # remove null feature samples
+                sample = np.array(sample, dtype=np.int32)
+                sample = np.reshape(sample[1:], (-1, sample[0]))
+                new_samples.append(sample)
+        self.samples[var_name] = new_samples
+
+    def predict(self, thining = 0, burnin = 0, use_iter=None, output_file = None):
+        """Predict the test cases
+        """
+        assert('Y' in self.samples and 'Z' in self.samples)
+        assert(len(self.samples['Y']) == len(self.samples['Z']))
+        
+        num_sample = len(self.samples['Y'])
+        num_obs = len(self.obs)
+        logprob_result = np.empty((num_sample, num_obs))
+
+        for i in xrange(num_sample):
+            cur_y = self.samples['Y'][i]
+            cur_z = self.samples['Z'][i]
+            
+            # generate all possible Zs
+            num_feature = cur_z.shape[1]
+            all_z = []
+            for n in xrange(num_feature+1):
+                base = [1] * n + [0] * (num_feature - n)
+                all_z.extend(list(set(itertools.permutations(base))))
+            all_z = np.array(all_z, dtype=np.int32)
+            
+            # BEGIN p(z|z_inferred) calculation
+
+            # the following lines of code may be a bit tricky to parse
+            # first, calculate the probability of features that already exist
+            # since features are additive within an image, we can just prod them
+            prior_off_prob = 1.0 - cur_z.sum(axis = 0) / float(cur_z.shape[0])
+            prior_prob = np.abs(all_z - prior_off_prob)
+
+            # then, locate the novel features in all_z
+            mask = np.ones(all_z.shape)
+            mask[:,np.where(cur_z.sum(axis = 0) > 0)] = 0
+            novel_all_z = all_z * mask
+            
+            # temporarily mark those cells to have probability 1
+            prior_prob[novel_all_z==1] = 1
+
+            # we can safely do row product now, still ignoring new features
+            prior_prob = prior_prob.prod(axis = 1)
+
+            # let's count the number of new features for each row
+            num_novel = novel_all_z.sum(axis = 1)
+            # calculate the probability
+            novel_prob = poisson.pmf(num_novel, self.alpha / float(cur_z.shape[0]))
+            # ignore the novel == 0 special case
+            novel_prob[num_novel==0] = 1.
+
+            # multiply it by prior prob
+            prior_prob = prior_prob * novel_prob
+            
+            # END p(z|z_inferred) calculation
+
+            # BEGIN p(x|z, y_inferred)
+            n_by_d = np.dot(all_z, cur_y)
+            not_on_p = np.power(1. - self.lam, n_by_d) * (1. - self.epislon)
+            for j in xrange(len(self.obs)):
+                prob = np.abs(self.obs[j] - not_on_p).prod(axis=1) 
+                prob = prob * prior_prob
+                prob = prob.sum()
+                logprob_result[i,j] = prob
+            # END
+                
+        return logprob_result.mean(axis=0), logprob_result.std(axis=0)
+        
+        
+if __name__ == '__main__':
+    
+    p = GibbsPredictor(cl_mode=False)
+    p.read_test_csv('../data/ibp-image-test.csv')
+    p.read_samples_csv('Y', '../data/ibp-image-n4-1000-noisyor-chain-1-nocl-Y.csv.gz')
+    p.read_samples_csv('Z', '../data/ibp-image-n4-1000-noisyor-chain-1-nocl-Z.csv.gz')
+    print(p.predict())
+
+
+#if __name__ == '__main__':
+
+#    NITER = 200
+#    #ibp_sampler = IBPNoisyOrTwoYUniformGibbs(cl_mode = False)
+#    ibp_sampler = BiasedGibbs(cl_mode = False)
+#    ibp_sampler.read_csv(pkg_dir + 'MPBNP/data/ibp-image-n8.csv')
+#    ibp_sampler.set_sampling_params(niter = NITER)
+#    ibp_sampler.do_inference()
