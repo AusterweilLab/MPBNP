@@ -379,14 +379,10 @@ class GibbsPredictor(BasePredictor):
         """
         assert('Y' in self.samples and 'Z' in self.samples)
         assert(len(self.samples['Y']) == len(self.samples['Z']))
-        return self._loglik()
         
-    def _loglik(self):
-        """Compute the loglikelihood of each test case.
-        """
         num_sample = len(self.samples['Y'])
         num_obs = len(self.obs)
-        loglik_result = np.empty((num_sample, num_obs))
+        logprob_result = np.empty((num_sample, num_obs))
 
         for i in xrange(num_sample):
             cur_y = self.samples['Y'][i]
@@ -400,20 +396,48 @@ class GibbsPredictor(BasePredictor):
                 all_z.extend(list(set(itertools.permutations(base))))
             all_z = np.array(all_z, dtype=np.int32)
             
-            # calculate the prior
-            prior_prob = cur_z.sum(axis = 0) / float(cur_z.shape[0]) * all_z
-            prior_prob[prior_prob == 0] = poisson.pmf(1, self.alpha / float(cur_z.shape[0]))
-            #cur_z = np.vstack((cur_z, np.ones(cur_z.shape[1], dtype=np.int32)))
+            # BEGIN p(z|z_inferred) calculation
 
+            # the following lines of code may be a bit tricky to parse
+            # first, calculate the probability of features that already exist
+            # since features are additive within an image, we can just prod them
+            prior_off_prob = 1.0 - cur_z.sum(axis = 0) / float(cur_z.shape[0])
+            prior_prob = np.abs(all_z - prior_off_prob)
+
+            # then, locate the novel features in all_z
+            mask = np.ones(all_z.shape)
+            mask[:,np.where(cur_z.sum(axis = 0) > 0)] = 0
+            novel_all_z = all_z * mask
+            
+            # temporarily mark those cells to have probability 1
+            prior_prob[novel_all_z==1] = 1
+
+            # we can safely do row product now, still ignoring new features
+            prior_prob = prior_prob.prod(axis = 1)
+
+            # let's count the number of new features for each row
+            num_novel = novel_all_z.sum(axis = 1)
+            # calculate the probability
+            novel_prob = poisson.pmf(num_novel, self.alpha / float(cur_z.shape[0]))
+            # ignore the novel == 0 special case
+            novel_prob[num_novel==0] = 1.
+
+            # multiply it by prior prob
+            prior_prob = prior_prob * novel_prob
+            
+            # END p(z|z_inferred) calculation
+
+            # BEGIN p(x|z, y_inferred)
             n_by_d = np.dot(all_z, cur_y)
             not_on_p = np.power(1. - self.lam, n_by_d) * (1. - self.epislon)
             for j in xrange(len(self.obs)):
                 prob = np.abs(self.obs[j] - not_on_p).prod(axis=1) 
-                prob = prob * prior_prob.prod(axis=1)
+                prob = prob * prior_prob
                 prob = prob.sum()
-                loglik_result[i,j] = prob
-
-        return loglik_result.mean(axis=0)
+                logprob_result[i,j] = prob
+            # END
+                
+        return logprob_result.mean(axis=0), logprob_result.std(axis=0)
         
         
 if __name__ == '__main__':
