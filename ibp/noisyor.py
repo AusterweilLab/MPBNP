@@ -2,7 +2,7 @@
 #-*- coding: utf-8 -*-
 
 from __future__ import print_function
-import sys, os.path
+import sys, os.path, itertools
 pkg_dir = os.path.dirname(os.path.realpath(__file__)) + '/../../'
 sys.path.append(pkg_dir)
 
@@ -343,3 +343,83 @@ class Gibbs(BaseSampler):
         
         return cur_y_new, cur_z_new
 
+class GibbsPredictor(BasePredictor):
+
+    def __init__(self, cl_mode = True, cl_device = None,
+                 alpha = 1.0, lam = 0.95, theta = 0.25, epislon = 0.05, init_k = 4):
+        """Initialize the predictor.
+        """
+        BasePredictor.__init__(self, cl_mode = cl_mode, cl_device = cl_device)
+        self.alpha = alpha
+        self.lam = lam
+        self.theta = theta
+        self.epislon = epislon
+
+    def read_test_csv(self, file_path, header=True):
+        """Read the test cases and convert values to integer.
+        """
+        BasePredictor.read_test_csv(self, file_path, header)
+        self.obs = np.array(self.obs, dtype=np.int32)
+        return
+
+    def read_samples_csv(self, var_name, file_path, header = True):
+        """Read test data from a csv file.
+        """
+        BasePredictor.read_samples_csv(self, var_name, file_path, header)
+        new_samples = []
+        for sample in self.samples[var_name]:
+            if len(sample) > 1: # remove null feature samples
+                sample = np.array(sample, dtype=np.int32)
+                sample = np.reshape(sample[1:], (-1, sample[0]))
+                new_samples.append(sample)
+        self.samples[var_name] = new_samples
+
+    def predict(self, thining = 0, burnin = 0, use_iter=None, output_file = None):
+        """Predict the test cases
+        """
+        assert('Y' in self.samples and 'Z' in self.samples)
+        assert(len(self.samples['Y']) == len(self.samples['Z']))
+        return self._loglik()
+        
+    def _loglik(self):
+        """Compute the loglikelihood of each test case.
+        """
+        num_sample = len(self.samples['Y'])
+        num_obs = len(self.obs)
+        loglik_result = np.empty((num_sample, num_obs))
+
+        for i in xrange(num_sample):
+            cur_y = self.samples['Y'][i]
+            cur_z = self.samples['Z'][i]
+            
+            # generate all possible Zs
+            num_feature = cur_z.shape[1]
+            all_z = []
+            for n in xrange(num_feature+1):
+                base = [1] * n + [0] * (num_feature - n)
+                all_z.extend(list(set(itertools.permutations(base))))
+            all_z = np.array(all_z, dtype=np.int32)
+            
+            # calculate the prior
+            prior_prob = cur_z.sum(axis = 0) / float(cur_z.shape[0]) * all_z
+            prior_prob[prior_prob == 0] = poisson.pmf(1, self.alpha / float(cur_z.shape[0]))
+            #cur_z = np.vstack((cur_z, np.ones(cur_z.shape[1], dtype=np.int32)))
+
+            n_by_d = np.dot(all_z, cur_y)
+            not_on_p = np.power(1. - self.lam, n_by_d) * (1. - self.epislon)
+            for j in xrange(len(self.obs)):
+                prob = np.abs(self.obs[j] - not_on_p).prod(axis=1) 
+                prob = prob * prior_prob.prod(axis=1)
+                prob = prob.sum()
+                loglik_result[i,j] = prob
+
+        return loglik_result.mean(axis=0)
+        
+        
+if __name__ == '__main__':
+    
+    p = GibbsPredictor(cl_mode=False)
+    p.read_test_csv('../data/ibp-image-test.csv')
+    p.read_samples_csv('Y', '../data/ibp-image-n4-1000-noisyor-chain-1-nocl-Y.csv.gz')
+    p.read_samples_csv('Z', '../data/ibp-image-n4-1000-noisyor-chain-1-nocl-Z.csv.gz')
+    print(p.predict())
