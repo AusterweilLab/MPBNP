@@ -5,6 +5,7 @@ from __future__ import print_function
 import pyopencl as cl, numpy as np
 import pyopencl.array
 import sys, copy, random, math, csv, gzip, mimetypes, os.path
+import cPickle
 from time import time
 
 def lognormalize(x):
@@ -88,6 +89,12 @@ class BasePredictor(object):
             self.samples[var_name].append(row)
         return
 
+    def read_samples(self, file_path):
+        """Read samples from a pickled file.
+        """
+        self.samples = cPickle.load(open(file_path))
+        return True
+        
     def predict(self, thining = 0, burnin = 0, use_iter=None, output_file = None):
         """Predict the test cases
         """
