@@ -459,8 +459,8 @@ class GibbsPredictor(BasePredictor):
 if __name__ == '__main__':
     
     p = GibbsPredictor(cl_mode=False)
-    p.read_test_csv('../data/ibp-image-test.csv')
-    p.read_samples('../data/ibp-image-n4-1000-noisyor-chain-1-nocl.h5')
+    p.read_test_csv('/home/qian/Dropbox/Projects/NegCorr/stimuli-svg/data/equal-standard-test.csv')
+    p.read_samples('/home/qian/Dropbox/Projects/NegCorr/stimuli-svg/data/equal-standard-1000-noisyor-chain-1-nocl.pickled')
     #p.read_samples_csv('Y', '../data/ibp-image-n4-1000-noisyor-chain-1-nocl-Y.csv.gz')
     #p.read_samples_csv('Z', '../data/ibp-image-n4-1000-noisyor-chain-1-nocl-Z.csv.gz')
     print(p.predict())

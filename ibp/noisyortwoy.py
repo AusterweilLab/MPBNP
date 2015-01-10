@@ -172,8 +172,8 @@ class BiasedGibbs(BaseSampler):
             for col in xrange(cur_f.shape[1]):
                 #print('row:', row, 'col:', col)
                 if f_prior is None:
-                    f_prior = [((cur_f == 1).sum() - int(cur_f[row,col] == 1) + .1) / ((cur_f > 0).sum() - int(cur_f[row,col] > 0) + .2),
-                               ((cur_f == 2).sum() - int(cur_f[row,col] == 2) + .1) / ((cur_f > 0).sum() - int(cur_f[row,col] > 0) + .2)]
+                    f_prior = [((cur_f == 1).sum() - int(cur_f[row,col] == 1) + .0001) / ((cur_f > 0).sum() - int(cur_f[row,col] > 0) + .0002),
+                               ((cur_f == 2).sum() - int(cur_f[row,col] == 2) + .0001) / ((cur_f > 0).sum() - int(cur_f[row,col] > 0) + .0002)]
 
                 prob_grid = np.array([inactive_prob[row, col], 
                                       active_prob[row, col] * f_prior[0], 
@@ -521,12 +521,85 @@ class UniformGibbsPredictor(BasePredictor):
             # END
                 
         return logprob_result.mean(axis=0), logprob_result.std(axis=0)
+
+class BiasedGibbsPredictor(UniformGibbsPredictor):
+
+    def predict(self, thining = 0, burnin = 0, use_iter=None, output_file = None):
+        """Predict the test cases
+        """
+        assert('y' in self.samples and 'z' in self.samples and 'f' in self.samples)
+        assert(len(self.samples['y']) == len(self.samples['z']) == len(self.samples['f']))
+        
+        num_sample = len(self.samples['y'])
+        num_obs = len(self.obs)
+        logprob_result = np.empty((num_sample, num_obs))
+
+        for i in xrange(num_sample):
+            cur_y = self.samples['y'][i]
+            cur_z = self.samples['z'][i]
+            cur_f = self.samples['f'][i]
+            
+            # generate all possible Zs
+            num_feature = cur_z.shape[1]
+            all_z = []
+            for n in xrange(num_feature+1):
+                base = [1] * n + [0] * (num_feature - n)
+                all_z.extend(list(set(itertools.permutations(base))))
+            all_z = np.array(all_z, dtype=np.int32)
+            
+            # BEGIN p(z|z_inferred) calculation
+
+            # the following lines of code may be a bit tricky to parse
+            # first, calculate the probability of on/off features 
+            prior_off_prob = 1.0 - cur_z.sum(axis = 0) / float(cur_z.shape[0])
+            prior_prob = np.abs(all_z - prior_off_prob)
+
+            # then, locate the novel features in all_z
+            mask = np.ones(all_z.shape)
+            mask[:,np.where(cur_z.sum(axis = 0) > 0)] = 0
+            novel_all_z = all_z * mask
+            
+            # temporarily mark those cells to have probability 1
+            prior_prob[novel_all_z==1] = 1
+
+            # we can safely do row product now, still ignoring new features
+            prior_prob = prior_prob.prod(axis = 1)
+
+            # let's count the number of new features for each row
+            num_novel = novel_all_z.sum(axis = 1)
+            # calculate the probability
+            novel_prob = poisson.pmf(num_novel, self.alpha / float(cur_z.shape[0]))
+            # ignore the novel == 0 special case
+            novel_prob[num_novel==0] = 1.
+
+            # multiply it by prior prob
+            prior_prob = prior_prob * novel_prob
+            
+            # END p(z|z_inferred) calculation
+
+            # BEGIN p(x|z, y_inferred)
+            # first deal with cur_y[0]
+            n_by_d0 = np.dot(all_z, cur_y[0])
+            n_by_d1 = np.dot(all_z, cur_y[1])
+            not_on_p0 = np.power(1. - self.lam, n_by_d0) * (1. - self.epislon)
+            not_on_p1 = np.power(1. - self.lam, n_by_d1) * (1. - self.epislon)
+            for j in xrange(len(self.obs)):
+                prob0 = np.abs(self.obs[j] - not_on_p0).prod(axis=1) 
+                prob1 = np.abs(self.obs[j] - not_on_p1).prod(axis=1) 
+                prob = float((cur_f == 1).sum()) / float((cur_f > 0).sum()) * prob0 * prior_prob + \
+                    float((cur_f == 2).sum()) / float((cur_f > 0).sum()) * prob1 * prior_prob
+                prob = prob.sum()
+                logprob_result[i,j] = prob
+            # END
+                
+        return logprob_result.mean(axis=0), logprob_result.std(axis=0)
+
         
 if __name__ == '__main__':
     
-    p = UniformGibbsPredictor(cl_mode=False)
-    p.read_test_csv('../data/ibp-image-test.csv')
-    p.read_samples('../data/ibp-image-n4-1000-noisyortwoy-uniform-chain-1-nocl.pickled')
+    p = BiasedGibbsPredictor(cl_mode=False)
+    p.read_test_csv('/home/qian/Dropbox/Projects/NegCorr/stimuli-svg/data/equal-standard-test.csv')
+    p.read_samples('/home/qian/Dropbox/Projects/NegCorr/stimuli-svg/data/disproportional-few-1000-noisyortwoy-biased-chain-1-nocl.pickled')
     print(p.predict())
 
 
