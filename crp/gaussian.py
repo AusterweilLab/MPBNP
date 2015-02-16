@@ -14,16 +14,21 @@ np.set_printoptions(suppress=True)
 
 class CollapsedGibbs(BaseSampler):
 
-    def __init__(self, cl_mode = True, inference_mode = True, alpha = 1.0, cl_device = None):
+    def __init__(self, cl_mode = True, alpha = 1.0, cl_device = None):
         """Initialize the class.
         """
-        BaseSampler.__init__(self, cl_mode, inference_mode, cl_device)
+        BaseSampler.__init__(self, cl_mode, cl_device)
 
         if cl_mode:
             program_str = open(pkg_dir + 'MPBNP/crp/kernels/crp_cl.c', 'r').read()
             self.prg = cl.Program(self.ctx, program_str).build()
 
+        # set some prior hyperparameters
         self.alpha = alpha
+        self.gamma_alpha0 = 1.
+        self.gamma_beta0 = 1.
+        self.gaussian_mu0 = 1.
+        self.gaussian_k0 = 0.001
 
     def read_csv(self, filepath, header=True):
         """Read the data from a csv file.
@@ -52,27 +57,20 @@ class CollapsedGibbs(BaseSampler):
         else:
             return self.infer_kdgaussian(init_labels = init_labels, output_file = output_file)
 
-    def generate(self, n = 1000, output_file = None):
-        BaseSampler.generate(self, n, output_file)
-        return
-        
+       
     def infer_1dgaussian(self, init_labels, output_file = None):
-        
-        # set some prior hyperparameters
-        gamma_alpha0 = 1.
-        gamma_beta0 = 1.
-        gaussian_mu0 = 1.
-        gaussian_k0 = 0.001
+        """Perform inference on class labels assuming data are 1-d gaussian,
+        without OpenCL acceleration.
+        """
+        total_time = 0
+        a_time = time()
 
-        data_size = self.obs.shape[0]
         cluster_labels = init_labels
-            
         cluster_dict = {}
         for cluster_label in np.unique(cluster_labels):
             cluster_dict[cluster_label] = list(np.where(cluster_labels == cluster_label)[0])
 
-        total_time = 0
-        if output_file is not None: print(*xrange(data_size), file = output_file, sep = ',')
+        if output_file is not None: print(*xrange(self.N), file = output_file, sep = ',')
         for i in xrange(self.niter):
             if output_file is not None and i >= self.burnin: 
                 print(*cluster_labels, file = output_file, sep = ',')            
@@ -86,22 +84,21 @@ class CollapsedGibbs(BaseSampler):
             var_s = y_bar_var_s[:,1]                
             n_s = y_bar_var_s[:,2]
             total_n = np.sum(n_s)
-            k_n_s = gaussian_k0 + n_s
-            mu_n_s  = (gaussian_k0 * gaussian_mu0 + n_s * y_bar_s) / k_n_s
-            alpha_n_s = gamma_alpha0 + n_s / 2.
-            beta_n_s = gamma_beta0 + 0.5 * var_s * n_s + gaussian_k0 * n_s * (y_bar_s - gaussian_mu0) ** 2 / (2 * k_n_s)
+            k_n_s = self.gaussian_k0 + n_s
+            mu_n_s  = (self.gaussian_k0 * self.gaussian_mu0 + n_s * y_bar_s) / k_n_s
+            alpha_n_s = self.gamma_alpha0 + n_s / 2.
+            beta_n_s = self.gamma_beta0 + 0.5 * var_s * n_s + \
+                       self.gaussian_k0 * n_s * (y_bar_s - self.gaussian_mu0) ** 2 / (2 * k_n_s)
             Lambda_s = alpha_n_s * k_n_s / (beta_n_s * (k_n_s + 1))
-            loglik_s = np.empty((data_size, len(n_s)), np.float32)
+            loglik_s = np.empty((self.N, len(n_s)), np.float32)
             
-            a_time = time()
             for c in xrange(len(n_s)):
                 t_frozen = t(df = 2 * alpha_n_s[c], loc = mu_n_s[c], scale = (1 / Lambda_s[c]) ** 0.5)
                 loglik_s[:,c] = t_frozen.logpdf(self.obs)
                 loglik_s[:,c] += np.log(n_s[c]) if n_s[c] > 0 else np.log(self.alpha)
 
-            for j in xrange(data_size):
-
-                # sample and implement the changes
+            # sample and implement the changes
+            for j in xrange(self.N):
                 target_cluster = sample(a = cluster_dict.keys(), p = lognormalize(loglik_s[j]))
                 cluster_dict[target_cluster].append(j)
                 cluster_dict[cluster_labels[j]].remove(j)
@@ -112,17 +109,17 @@ class CollapsedGibbs(BaseSampler):
             for k,v in cluster_dict.items():
                 if len(v) == 0: del cluster_dict[k]
 
-        print("%f seconds" % total_time)
+        print("%f seconds" % total_time, file=sys.stderr)
         return -1.0, total_time, Counter(cluster_labels).most_common()
 
     def cl_infer_1dgaussian(self, init_labels, output_file = None):
         """Implementing concurrent sampling of class labels with OpenCL.
         """
         gpu_time, total_time = 0, 0
-        # set some prior hyperparameters
-        gamma_alpha0, gamma_beta0 = (1., 1.)
-        gaussian_mu0, gaussian_k0 = (1., 0.001)
-        d_hyper_param = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = np.array([gaussian_mu0, gaussian_k0, gamma_alpha0, gamma_beta0, self.alpha]).astype(np.float32))
+
+        d_hyper_param = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
+                                  hostbuf = np.array([self.gaussian_mu0, self.gaussian_k0, 
+                                                      self.gamma_alpha0, self.gamma_beta0, self.alpha]).astype(np.float32))
 
         data_size = self.obs.shape[0]
         cluster_labels = init_labels
@@ -255,10 +252,6 @@ class CollapsedGibbs(BaseSampler):
     def cl_infer_kdgaussian(self, init_labels, output_file = None):
         """Implementing concurrent sampling of class labels with OpenCL.
         """
-        if not self.inference_mode: 
-            print("Sorry. This function is only callable when the sampler is intialized in a inference mode")
-            sys.exit(0)
-
         try: dim = np.int32(self.obs.shape[1])
         except IndexError: 
             dim = np.int32(1)

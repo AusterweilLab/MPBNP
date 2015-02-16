@@ -45,7 +45,7 @@ def print_matrix_in_row(npmat, file_dest):
 
 class BaseSampler(object):
 
-    def __init__(self, cl_mode = True, inference_mode = True, cl_device = None):
+    def __init__(self, cl_mode = True, cl_device = None):
         """Initialize the class.
         """
         if cl_mode:
@@ -71,20 +71,15 @@ class BaseSampler(object):
             self.device_compute_units = self.device.max_compute_units
 
         self.cl_mode = cl_mode
-        self.inference_mode = inference_mode
-        if inference_mode:
-            self.obs = []
-            self.input_csv_name = None
-            self.niter = 1000
-            self.thining = 0
-            self.burnin = 0
+        self.obs = []
+        self.niter = 1000
+        self.thining = 0
+        self.burnin = 0
+        self.N = 0 # number of data points
 
     def read_csv(self, filepath, header = True):
         """Read data from a csv file.
         """
-        if type(filepath) is str:
-            self.input_csv_name, _ = os.path.splitext(filepath)
-        
         # determine if the type file is gzip
         filetype, _ = mimetypes.guess_type(filepath)
         if filetype == 'gzip':
@@ -99,6 +94,8 @@ class BaseSampler(object):
             reader.next()
         for row in reader:
             self.obs.append([_ for _ in row])
+            
+        self.N = len(self.obs)
         return
 
     def direct_read_obs(self, obs):
@@ -108,15 +105,12 @@ class BaseSampler(object):
         self.niter, self.thining, self.burnin = niter, thining, burnin
 
     def do_inference(self, output_file = None):
-        if not self.inference_mode: 
-            print("Cannot perform inference in generative mode")
-            sys.exit(0)
+        """Perform inference. This method does nothing in the base class.
+        """
         return
 
-    def generate(self, n = 1000, output_file = None):
-        """Generate n random samples from the assumed generative model.
+    def _loglik(self, sample):
+        """Compute the logliklihood of data given a sample. This method
+        does nothing in the base class.
         """
-        if self.inference_mode: 
-            print("Cannot generate random samples in inference mode")
-            sys.exit(0)
         return
