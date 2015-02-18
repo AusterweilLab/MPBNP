@@ -16,17 +16,15 @@ np.set_printoptions(suppress=True)
 
 class Gibbs(BaseSampler):
 
-    def __init__(self, cl_mode = True, inference_mode = True, cl_device = None,
-                 alpha = 1.0, lam = 0.95, theta = 0.25, epislon = 0.05, init_k = 4):
+    def __init__(self, cl_mode = True, cl_device = None,
+                 alpha = 1.0, lam = 0.98, theta = 0.01, epislon = 0.02, init_k = 4):
         """Initialize the class.
         """
-        BaseSampler.__init__(self, cl_mode, inference_mode, cl_device)
+        BaseSampler.__init__(self, cl_mode, cl_device)
 
         if cl_mode:
             program_str = open(pkg_dir + 'MPBNP/ibp/kernels/ibp_noisyor_cl.c', 'r').read()
-            #utilities_str = open('kernels/utilities_cl.c', 'r').read()
             self.prg = cl.Program(self.ctx, program_str).build()
-            #self.util = cl.Program(self.ctx, utilities_str).build()
 
         self.alpha = alpha # tendency to generate new features
         self.k = init_k    # initial number of features
@@ -70,9 +68,6 @@ class Gibbs(BaseSampler):
             assert(type(init_z) is np.ndarray)
             assert(init_z.shape == (len(self.obs), self.k))
 
-#        if output_file is not None: 
-#            self.samples = h5py.File(output_file, 'w')
-            
         if self.cl_mode:
             return self._cl_infer_yz(init_y, init_z, output_file)
         else:
@@ -99,14 +94,6 @@ class Gibbs(BaseSampler):
 
         if output_file is not None:
             cPickle.dump(self.samples, open(output_file, 'w'))                
-#                self.samples.create_dataset(name='z/{0}'.format(i), 
-#                                            data=cur_z, 
-#                                            dtype=cur_z.dtype, 
-#                                            compression='gzip', compression_opts=9)
-#                self.samples.create_dataset(name='y/{0}'.format(i), 
-#                                            data=cur_y, 
-#                                            dtype=cur_y.dtype, 
-#                                            compression='gzip', compression_opts=9)
 
         return -1, time() - a_time, None
 
@@ -285,9 +272,6 @@ class Gibbs(BaseSampler):
             cur_z = self._cl_infer_z(cur_y, cur_z, d_obs)
             gpu_time += time() - a_time
             cur_y, cur_z = self._cl_infer_k_new(cur_y, cur_z)
-            if output_file is not None and i >= self.burnin: 
-                self.samples.create_dataset('z/{0}'.format(i), data = cur_z, dtype=cur_z.dtype)
-                self.samples.create_dataset('y/{0}'.format(i), data = cur_y, dtype=cur_y.dtype)
             total_time += time() - a_time
 
         return gpu_time, total_time, None
@@ -362,7 +346,7 @@ class Gibbs(BaseSampler):
 class GibbsPredictor(BasePredictor):
 
     def __init__(self, cl_mode = True, cl_device = None,
-                 alpha = 1.0, lam = 0.95, theta = 0.25, epislon = 0.05, init_k = 4):
+                 alpha = 1.0, lam = 0.98, theta = 0.01, epislon = 0.02, init_k = 4):
         """Initialize the predictor.
         """
         BasePredictor.__init__(self, cl_mode = cl_mode, cl_device = cl_device)
@@ -448,19 +432,23 @@ class GibbsPredictor(BasePredictor):
             not_on_p = np.power(1. - self.lam, n_by_d) * (1. - self.epislon)
             for j in xrange(len(self.obs)):
                 prob = np.abs(self.obs[j] - not_on_p).prod(axis=1) 
-                prob = prob * prior_prob
+                prob = prob #* prior_prob
                 prob = prob.sum()
                 logprob_result[i,j] = prob
             # END
                 
-        return logprob_result.mean(axis=0), logprob_result.std(axis=0)
+        return logprob_result.max(axis=0), logprob_result.std(axis=0)
         
         
 if __name__ == '__main__':
     
     p = GibbsPredictor(cl_mode=False)
-    p.read_test_csv('/home/qian/Dropbox/Projects/NegCorr/stimuli-svg/data/equal-standard-test.csv')
-    p.read_samples('/home/qian/Dropbox/Projects/NegCorr/stimuli-svg/data/equal-standard-1000-noisyor-chain-1-nocl.pickled')
+    p.read_test_csv('/home/qian/Dropbox/Projects/NegCorr/mturk/training-images-bits/test.csv')
+    p.read_samples('/home/qian/Dropbox/Projects/NegCorr/mturk/training-images-bits/add-1000-noisyor-chain-1-nocl.pickled')
     #p.read_samples_csv('Y', '../data/ibp-image-n4-1000-noisyor-chain-1-nocl-Y.csv.gz')
     #p.read_samples_csv('Z', '../data/ibp-image-n4-1000-noisyor-chain-1-nocl-Z.csv.gz')
-    print(p.predict())
+    results = p.predict()
+    print(results)
+    #print(results[:,:2].mean(), results[:,:2].std())
+    #print(results[:,2].mean(), results[:,2].std())
+    #print(results[:,3].mean(), results[:,3].std())

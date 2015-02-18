@@ -129,6 +129,7 @@ class CollapsedGibbs(BaseSampler):
         
         if output_file is not None: print(*xrange(data_size), file = output_file, sep = ',')
         total_a_time = time()
+
         for i in xrange(self.niter):
             if output_file is not None and i >= self.burnin: 
                 print(*cluster_labels, file = output_file, sep = ',')            

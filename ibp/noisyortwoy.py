@@ -15,11 +15,11 @@ np.set_printoptions(suppress=True)
 
 class BiasedGibbs(BaseSampler):
 
-    def __init__(self, cl_mode = True, inference_mode = True, cl_device = None,
+    def __init__(self, cl_mode = True, cl_device = None,
                  alpha = 1.0, lam = 0.95, theta = 0.25, epislon = 0.05, init_k = 2):
         """Initialize the class.
         """
-        BaseSampler.__init__(self, cl_mode, inference_mode, cl_device)
+        BaseSampler.__init__(self, cl_mode, cl_device)
 
         if cl_mode:
             program_str = open(pkg_dir + './kernels/ibp_noisyor_cl.c', 'r').read()
@@ -515,12 +515,13 @@ class UniformGibbsPredictor(BasePredictor):
             for j in xrange(len(self.obs)):
                 prob0 = np.abs(self.obs[j] - not_on_p0).prod(axis=1) 
                 prob1 = np.abs(self.obs[j] - not_on_p1).prod(axis=1) 
-                prob = prob0 * prior_prob + prob1 * prior_prob
+                #prob = prob0 * prior_prob + prob1 * prior_prob
+                prob = prob0 + prob1
                 prob = prob.sum()
                 logprob_result[i,j] = prob
             # END
                 
-        return logprob_result.mean(axis=0), logprob_result.std(axis=0)
+        return logprob_result.max(axis=0), logprob_result.std(axis=0)
 
 class BiasedGibbsPredictor(UniformGibbsPredictor):
 
@@ -597,9 +598,9 @@ class BiasedGibbsPredictor(UniformGibbsPredictor):
         
 if __name__ == '__main__':
     
-    p = BiasedGibbsPredictor(cl_mode=False)
-    p.read_test_csv('/home/qian/Dropbox/Projects/NegCorr/stimuli-svg/data/equal-standard-test.csv')
-    p.read_samples('/home/qian/Dropbox/Projects/NegCorr/stimuli-svg/data/disproportional-few-1000-noisyortwoy-biased-chain-1-nocl.pickled')
+    p = UniformGibbsPredictor(cl_mode=False)
+    p.read_test_csv('/home/qian/Dropbox/Projects/NegCorr/mturk/training-images-bits/test.csv')
+    p.read_samples('/home/qian/Dropbox/Projects/NegCorr/mturk/training-images-bits/add-1000-noisyortwoy-uniform-chain-1-nocl.pickled')
     print(p.predict())
 
 
