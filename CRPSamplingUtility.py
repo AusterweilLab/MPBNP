@@ -37,6 +37,7 @@ parser.add_argument('--data_file', type=str, required=True)
 parser.add_argument('--kernel', choices=['gaussian', 'categorical'], default='gaussian', help='The distribution of each component. Default is gaussian/normal. Also supports categorical distributions')
 parser.add_argument('--iter', '-t', type=int, default=10000, help='The number of iterations the sampler should run')
 parser.add_argument('--burnin', '-b', type=int, default=2000, help='The number of iterations discarded as burn-in.')
+parser.add_argument('--output_mode', choices=['best', 'all'], default='best', help='Output mode. Default is keeping only the sample that yields the highest logliklihood of data. The other option is to keep all samples.')
 parser.add_argument('--output_to_file', action='store_true', help="Write posterior samples to a log file in the current directory. Default behavior is not keeping records of posterior samples")
 parser.add_argument('--output_to_stdout', action='store_true', help="Write posterior samples to standard output (i.e., your screen). Default behavior is not keeping records of posterior samples")
 parser.add_argument('--chain', '-c', type=int, default=1, help='The number of chains to run. Default is 1.')
@@ -53,7 +54,9 @@ output_path = os.path.dirname(os.path.realpath(args.data_file)) + '/'
 
 # set up the sampler
 if args.kernel == 'gaussian':
-    c = crp.gaussian.CollapsedGibbs(cl_mode = args.opencl, cl_device = args.opencl_device)
+    c = crp.gaussian.CollapsedGibbs(cl_mode = args.opencl,
+                                    cl_device = args.opencl_device,
+                                    record_best = args.output_mode == 'best')
 elif args.kernel == 'categorical':
     c = crp.categorical.CollapsedGibbs(cl_mode = args.opencl, cl_device = args.opencl_device)
 
@@ -76,3 +79,4 @@ for chain in xrange(args.chain):
     print("Chain %d running, please wait ..." % (chain + 1), file=sys.stderr)
     gpu_time, total_time, common_clusters = c.do_inference(output_file = file_dest)
     print("Chain %d finished. OpenCL device time: %f; Total_time: %f seconds\n" % (chain + 1, gpu_time, total_time), file=sys.stderr)
+

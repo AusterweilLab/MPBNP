@@ -15,10 +15,10 @@ np.set_printoptions(suppress=True)
 
 class CollapsedGibbs(BaseSampler):
 
-    def __init__(self, cl_mode = True, alpha = 1.0, cl_device = None):
+    def __init__(self, cl_mode = True, alpha = 1.0, cl_device = None, record_best = True):
         """Initialize the class.
         """
-        BaseSampler.__init__(self, cl_mode, cl_device)
+        BaseSampler.__init__(self, record_best, cl_mode, cl_device)
 
         if cl_mode:
             program_str = open(pkg_dir + 'MPBNP/crp/kernels/crp_cl.c', 'r').read()
@@ -67,15 +67,16 @@ class CollapsedGibbs(BaseSampler):
         a_time = time()
 
         cluster_labels = init_labels
-        self.auto_save_sample(cluster_labels)
+        if self.record_best:
+            self.auto_save_sample(cluster_labels)
         
-        cluster_dict = {}
-        for cluster_label in np.unique(cluster_labels):
-            cluster_dict[cluster_label] = list(np.where(cluster_labels == cluster_label)[0])
-
         if output_file is not None: print(*xrange(self.N), file = output_file, sep = ',')
         for i in xrange(self.niter):
-            if output_file is not None and i >= self.burnin: 
+            cluster_dict = {}
+            for cluster_label in np.unique(cluster_labels):
+                cluster_dict[cluster_label] = list(np.where(cluster_labels == cluster_label)[0])
+
+            if output_file is not None and i >= self.burnin and not self.record_best: 
                 print(*cluster_labels, file = output_file, sep = ',')            
             _, _, new_cluster_label = smallest_unused_label(cluster_dict.keys())
             cluster_dict[new_cluster_label] = []
@@ -88,10 +89,9 @@ class CollapsedGibbs(BaseSampler):
             var_s = y_bar_var_s[:,1]                
             n_s = y_bar_var_s[:,2]
 
-            
             k_n_s = self.gaussian_k0 + n_s
             mu_n_s  = (self.gaussian_k0 * self.gaussian_mu0 + n_s * y_bar_s) / k_n_s
-            alpha_n_s = self.gamma_alpha0 + n_s / 2.
+            alpha_n_s = self.gamma_alpha0 + n_s / 2
             beta_n_s = self.gamma_beta0 + 0.5 * var_s * n_s + \
                        self.gaussian_k0 * n_s * (y_bar_s - self.gaussian_mu0) ** 2 / (2 * k_n_s)
             Lambda_s = alpha_n_s * k_n_s / (beta_n_s * (k_n_s + 1))
@@ -101,22 +101,20 @@ class CollapsedGibbs(BaseSampler):
                 t_frozen = t(df = 2 * alpha_n_s[c], loc = mu_n_s[c], scale = (1 / Lambda_s[c]) ** 0.5)
                 loglik_s[:,c] = t_frozen.logpdf(self.obs[:1])
                 loglik_s[:,c] += np.log(n_s[c]) if n_s[c] > 0 else np.log(self.alpha)
-
+            
             # sample and implement the changes
             for j in xrange(self.N):
                 target_cluster = sample(a = cluster_dict.keys(), p = lognormalize(loglik_s[j]))
-                cluster_dict[target_cluster].append(j)
-                cluster_dict[cluster_labels[j]].remove(j)
                 cluster_labels[j] = target_cluster
 
-            for k,v in cluster_dict.items():
-                if len(v) == 0: del cluster_dict[k]
+            if self.record_best:
+                self.auto_save_sample(cluster_labels)
+                
+        if output_file is not None and self.record_best: 
+            print(*self.best_sample[0], file = output_file, sep = ',')
 
-            self.auto_save_sample(cluster_labels)
-                
         total_time += time() - a_time
-                
-        print("%f seconds" % total_time, file=sys.stderr)
+
         return -1.0, total_time, Counter(cluster_labels).most_common()
 
     def cl_infer_1dgaussian(self, init_labels, output_file = None):
@@ -129,7 +127,8 @@ class CollapsedGibbs(BaseSampler):
                                                       self.gamma_alpha0, self.gamma_beta0, self.alpha]).astype(np.float32))
 
         cluster_labels = init_labels
-        self.auto_save_sample(cluster_labels)
+        if self.record_best:
+            self.auto_save_sample(cluster_labels)
 
         d_data = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = self.obs)
         d_labels = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = cluster_labels)
@@ -138,7 +137,7 @@ class CollapsedGibbs(BaseSampler):
         total_a_time = time()
 
         for i in xrange(self.niter):
-            if output_file is not None and i >= self.burnin: 
+            if output_file is not None and i >= self.burnin and not self.record_best: 
                 print(*cluster_labels, file = output_file, sep = ',')            
         
             uniq_labels = np.unique(cluster_labels)
@@ -185,9 +184,16 @@ class CollapsedGibbs(BaseSampler):
             temp_cluster_labels = np.empty(cluster_labels.shape, dtype=np.int32)
             cl.enqueue_copy(self.queue, temp_cluster_labels, d_labels)
             gpu_time += time() - gpu_a_time
-            if self.auto_save_sample(temp_cluster_labels):
+
+            if self.record_best:
+                if self.auto_save_sample(temp_cluster_labels):
+                    cluster_labels = temp_cluster_labels
+            else:
                 cluster_labels = temp_cluster_labels
-         
+
+        if output_file is not None and self.record_best: 
+            print(*self.best_sample[0], file = output_file, sep = ',')
+            
         total_time = time() - total_a_time
         return gpu_time, total_time, Counter(cluster_labels).most_common()
 

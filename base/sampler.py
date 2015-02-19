@@ -45,7 +45,7 @@ def print_matrix_in_row(npmat, file_dest):
 
 class BaseSampler(object):
 
-    def __init__(self, cl_mode = True, cl_device = None):
+    def __init__(self, record_best, cl_mode, cl_device = None):
         """Initialize the class.
         """
         if cl_mode:
@@ -77,7 +77,7 @@ class BaseSampler(object):
         self.burnin = 0
         self.N = 0 # number of data points
         self.best_sample = (None, None) # (sample, loglikelihood)
-        self.record_best = True
+        self.record_best = record_best
 
     def read_csv(self, filepath, header = True):
         """Read data from a csv file.
