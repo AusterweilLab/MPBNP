@@ -76,6 +76,8 @@ class BaseSampler(object):
         self.thining = 0
         self.burnin = 0
         self.N = 0 # number of data points
+        self.best_sample = (None, None) # (sample, loglikelihood)
+        self.record_best = True
 
     def read_csv(self, filepath, header = True):
         """Read data from a csv file.
@@ -108,6 +110,22 @@ class BaseSampler(object):
         """Perform inference. This method does nothing in the base class.
         """
         return
+
+    def auto_save_sample(self, sample):
+        """Save the given sample as the best sample if it yields
+        a larger log-likelihood of data than the current best.
+        """
+        new_loglik = self._loglik(sample)
+        # if there's no best sample recorded yet
+        if self.best_sample[0] is None and self.best_sample[1] is None:
+            self.best_sample = (sample, new_loglik)
+            return
+        # if there's a best sample
+        if new_loglik > self.best_sample[1]:
+            self.best_sample = (sample, new_loglik)
+            print('New sample found, loglik: {0}'.format(new_loglik), file=sys.stderr)
+            return True
+        return False
 
     def _loglik(self, sample):
         """Compute the logliklihood of data given a sample. This method

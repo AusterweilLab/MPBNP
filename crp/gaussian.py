@@ -1,6 +1,7 @@
 #-*- coding: utf-8 -*-
 
 from __future__ import print_function
+from __future__ import division
 import sys, os.path
 pkg_dir = os.path.dirname(os.path.realpath(__file__)) + '/../../'
 sys.path.append(pkg_dir)
@@ -66,6 +67,8 @@ class CollapsedGibbs(BaseSampler):
         a_time = time()
 
         cluster_labels = init_labels
+        self.auto_save_sample(cluster_labels)
+        
         cluster_dict = {}
         for cluster_label in np.unique(cluster_labels):
             cluster_dict[cluster_label] = list(np.where(cluster_labels == cluster_label)[0])
@@ -80,10 +83,12 @@ class CollapsedGibbs(BaseSampler):
             y_bar_var_s = np.array([(np.mean(self.obs[indices]), np.var(self.obs[indices]), len(indices))
                                     if len(indices) > 0 else (0.0, 0.0, 0.0)
                                     for label, indices in cluster_dict.iteritems()])
+            
             y_bar_s = y_bar_var_s[:,0]
             var_s = y_bar_var_s[:,1]                
             n_s = y_bar_var_s[:,2]
-            total_n = np.sum(n_s)
+
+            
             k_n_s = self.gaussian_k0 + n_s
             mu_n_s  = (self.gaussian_k0 * self.gaussian_mu0 + n_s * y_bar_s) / k_n_s
             alpha_n_s = self.gamma_alpha0 + n_s / 2.
@@ -94,7 +99,7 @@ class CollapsedGibbs(BaseSampler):
             
             for c in xrange(len(n_s)):
                 t_frozen = t(df = 2 * alpha_n_s[c], loc = mu_n_s[c], scale = (1 / Lambda_s[c]) ** 0.5)
-                loglik_s[:,c] = t_frozen.logpdf(self.obs)
+                loglik_s[:,c] = t_frozen.logpdf(self.obs[:1])
                 loglik_s[:,c] += np.log(n_s[c]) if n_s[c] > 0 else np.log(self.alpha)
 
             # sample and implement the changes
@@ -104,11 +109,13 @@ class CollapsedGibbs(BaseSampler):
                 cluster_dict[cluster_labels[j]].remove(j)
                 cluster_labels[j] = target_cluster
 
-            total_time += time() - a_time
-                
             for k,v in cluster_dict.items():
                 if len(v) == 0: del cluster_dict[k]
 
+            self.auto_save_sample(cluster_labels)
+                
+        total_time += time() - a_time
+                
         print("%f seconds" % total_time, file=sys.stderr)
         return -1.0, total_time, Counter(cluster_labels).most_common()
 
@@ -121,13 +128,13 @@ class CollapsedGibbs(BaseSampler):
                                   hostbuf = np.array([self.gaussian_mu0, self.gaussian_k0, 
                                                       self.gamma_alpha0, self.gamma_beta0, self.alpha]).astype(np.float32))
 
-        data_size = self.obs.shape[0]
         cluster_labels = init_labels
+        self.auto_save_sample(cluster_labels)
 
         d_data = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = self.obs)
         d_labels = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = cluster_labels)
         
-        if output_file is not None: print(*xrange(data_size), file = output_file, sep = ',')
+        if output_file is not None: print(*xrange(self.N), file = output_file, sep = ',')
         total_a_time = time()
 
         for i in xrange(self.niter):
@@ -175,8 +182,11 @@ class CollapsedGibbs(BaseSampler):
                                          d_labels, d_uniq_label, np.int32(uniq_labels.shape[0]),
                                          d_rand, d_logpost.data)
 
-            cl.enqueue_copy(self.queue, cluster_labels, d_labels)
+            temp_cluster_labels = np.empty(cluster_labels.shape, dtype=np.int32)
+            cl.enqueue_copy(self.queue, temp_cluster_labels, d_labels)
             gpu_time += time() - gpu_a_time
+            if self.auto_save_sample(temp_cluster_labels):
+                cluster_labels = temp_cluster_labels
          
         total_time = time() - total_a_time
         return gpu_time, total_time, Counter(cluster_labels).most_common()
@@ -187,7 +197,9 @@ class CollapsedGibbs(BaseSampler):
         try: dim = self.obs.shape[1]
         except IndexError: 
             dim = 1
+        if dim == 1:
             return self.infer_1dgaussian(init_labels = init_labels, output_file = output_file)
+
         data_size = self.obs.shape[0]
 
         # set some prior hyperparameters
@@ -359,3 +371,46 @@ class CollapsedGibbs(BaseSampler):
         total_time = time() - total_a_time
             
         return gpu_time, total_time, Counter(cluster_labels).most_common()
+
+
+    def _loglik(self, sample):
+        """Calculation the loglikelihood of data given a sample.
+        """
+        assert(len(sample) == len(self.obs))
+
+        try: dim = self.obs.shape[1]
+        except IndexError: dim = 1
+        
+        total_loglik = 0
+        
+        if dim == 1:
+            cluster_dict = {}
+            N = 0
+            for label, obs in zip(sample, self.obs):
+                obs = obs[0]
+                if label in cluster_dict:
+                    n = len(cluster_dict[label])
+                    y_bar = np.mean(cluster_dict[label])
+                    var = np.var(cluster_dict[label])
+                else:
+                    n, y_bar, var = 0, 0, 0
+
+                k_n = self.gaussian_k0 + n
+                mu_n  = (self.gaussian_k0 * self.gaussian_mu0 + n * y_bar) / k_n
+                alpha_n = self.gamma_alpha0 + n / 2
+                beta_n = self.gamma_beta0 + 0.5 * var * n + \
+                         self.gaussian_k0 * n * (y_bar - self.gaussian_mu0) ** 2 / (2 * k_n)
+                Lambda = alpha_n * k_n / (beta_n * (k_n + 1))
+                
+                t_frozen = t(df = 2 * alpha_n, loc = mu_n, scale = (1 / Lambda) ** 0.5)
+                loglik = t_frozen.logpdf(obs)
+                loglik += np.log(n / (N + self.alpha)) if n > 0 else np.log(self.alpha / (N + self.alpha))
+
+                # modify the counts and dict
+                try: cluster_dict[label].append(obs)
+                except KeyError: cluster_dict[label] = [obs]
+                N += 1
+                
+                total_loglik += loglik
+
+        return total_loglik
