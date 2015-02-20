@@ -391,7 +391,7 @@ class CollapsedGibbs(BaseSampler):
         
         total_loglik = 0
         
-        if dim == 1:
+        if dim == 1 and self.cl_mode == False:
             cluster_dict = {}
             N = 0
             for label, obs in zip(sample, self.obs):
@@ -402,7 +402,7 @@ class CollapsedGibbs(BaseSampler):
                     var = np.var(cluster_dict[label])
                 else:
                     n, y_bar, var = 0, 0, 0
-
+                    
                 k_n = self.gaussian_k0 + n
                 mu_n  = (self.gaussian_k0 * self.gaussian_mu0 + n * y_bar) / k_n
                 alpha_n = self.gamma_alpha0 + n / 2
@@ -418,7 +418,18 @@ class CollapsedGibbs(BaseSampler):
                 try: cluster_dict[label].append(obs)
                 except KeyError: cluster_dict[label] = [obs]
                 N += 1
-                
+
                 total_loglik += loglik
 
+        if dim == 1 and self.cl_mode:
+            d_data = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = self.obs[:,0])
+            d_labels = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = sample)
+            d_hyper_param = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
+                                      hostbuf = np.array([self.gaussian_mu0, self.gaussian_k0, 
+                                                          self.gamma_alpha0, self.gamma_beta0, self.alpha]).astype(np.float32))
+            d_logprob = cl.array.empty(self.queue, (self.N,), np.float32)
+            self.prg.joint_logprob(self.queue, self.obs.shape, None,
+                                   d_labels, d_data, d_hyper_param, d_logprob.data)
+            
+            total_loglik = d_logprob.get().sum()
         return total_loglik

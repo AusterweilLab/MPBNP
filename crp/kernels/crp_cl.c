@@ -1,4 +1,3 @@
-//#pragma OPENCL EXTENSION cl_khr_fp64: enable
 float t_logpdf(float theta, float df, float loc, float scale) {
   float part1 = lgamma((df + 1.0f) / 2.0f) - lgamma(0.5f * df) -  log(pow(df * M_PI_F, 0.5f) * scale);
   float part2 = -0.5f * (df + 1.0f) * log(1.0f + (1.0f / df) * pow((float)(theta - loc) / scale, 2.0f));
@@ -101,7 +100,6 @@ __kernel void normal_1d_logpost(global uint *labels, global float *data, global 
   logpost[i * cluster_num + c] += (new_size > 0) ? 
     log(new_size/(alpha + data_size)) : log(alpha/(alpha + data_size));
   barrier(CLK_LOCAL_MEM_FENCE|CLK_GLOBAL_MEM_FENCE);
-
 }
 
 __kernel void normal_1d_logpost_loopy(global uint *labels, global float *data, global uint *uniq_label, 
@@ -149,6 +147,56 @@ __kernel void normal_1d_logpost_loopy(global uint *labels, global float *data, g
   
   lognormalize(logpost, i * cluster_num, cluster_num);
   labels[i] = sample(cluster_num, uniq_label, logpost, i * cluster_num, rand[i]);
+}
+
+/* kernel to compute the joint log probability of data and a given sample (i.e., labels)*/
+__kernel void joint_logprob(global uint *labels, global float *data, 
+			    global float *hyper_param, global float *logprob) {
+
+  uint data_pos = get_global_id(0);
+  uint label = labels[data_pos];
+  
+  float gaussian_mu0 = hyper_param[0];
+  float gaussian_k0 = hyper_param[1];
+  float gamma_alpha0 = hyper_param[2];
+  float gamma_beta0 = hyper_param[3];
+  float alpha = hyper_param[4];
+
+  float k_n, mu_n;
+  float alpha_n, beta_n;
+  float Lambda, sigma;
+  float sum = 0.0f, mu=0.0f, ss=0.0f;
+  int n = 0;
+
+  for (int i = 0; i < data_pos; i++) {
+    if (labels[i] == label) {
+      n += 1;
+      sum += data[i];
+    }
+  }
+  if (n == 0) {
+    mu = 0.0f;
+    ss = 0.0f;
+  }
+  else { 
+    mu = sum / n;
+    for (int i = 0; i < data_pos; i++) {
+      if (labels[i] == label) {
+	ss += pow(data[i] - mu, 2.0f);
+      }
+    }
+  }
+
+  /* compute other variables */
+  k_n = gaussian_k0 + n;
+  mu_n = (gaussian_k0 * gaussian_mu0 + n * mu) / k_n;
+  alpha_n = gamma_alpha0 + n / 2.0f;
+  beta_n = gamma_beta0 + 0.5f * ss + gaussian_k0 * n * pow(mu - gaussian_mu0, 2.0f) / (2.0f * k_n);
+  Lambda = alpha_n * k_n / (beta_n * (k_n + 1.0f));
+  sigma = pow(1.0f/Lambda, 0.5f);
+  /* compute the joint log probability */
+  logprob[data_pos] = t_logpdf(data[data_pos], 2.0f * alpha_n, mu_n, sigma);
+  logprob[data_pos] += (n > 0) ? log( (float)n / ((float)data_pos + alpha)) : log(alpha / ((float)data_pos + alpha));
 }
 
 __kernel void normal_kd_sigma_matrix(global uint *n, global float *cov_obs, global float *cov_mu0, global float *T, float k0, float v0, global float *sigma) {
