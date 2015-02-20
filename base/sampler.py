@@ -123,7 +123,7 @@ class BaseSampler(object):
         # if there's a best sample
         if new_loglik > self.best_sample[1]:
             self.best_sample = (sample, new_loglik)
-            print('New sample found, loglik: {0}'.format(new_loglik), file=sys.stderr)
+            print('New best sample found, loglik: {0}'.format(new_loglik), file=sys.stderr)
             return True
         return False
 

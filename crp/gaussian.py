@@ -58,7 +58,6 @@ class CollapsedGibbs(BaseSampler):
         else:
             return self.infer_kdgaussian(init_labels = init_labels, output_file = output_file)
 
-       
     def infer_1dgaussian(self, init_labels, output_file = None):
         """Perform inference on class labels assuming data are 1-d gaussian,
         without OpenCL acceleration.
@@ -72,49 +71,52 @@ class CollapsedGibbs(BaseSampler):
         
         if output_file is not None: print(*xrange(self.N), file = output_file, sep = ',')
         for i in xrange(self.niter):
-            cluster_dict = {}
-            for cluster_label in np.unique(cluster_labels):
-                cluster_dict[cluster_label] = list(np.where(cluster_labels == cluster_label)[0])
 
             if output_file is not None and i >= self.burnin and not self.record_best: 
-                print(*cluster_labels, file = output_file, sep = ',')            
-            _, _, new_cluster_label = smallest_unused_label(cluster_dict.keys())
-            cluster_dict[new_cluster_label] = []
+                print(*cluster_labels, file = output_file, sep = ',')  
+            # identify existing clusters and generate a new one
+            uniq_labels = np.unique(cluster_labels)
+            _, _, new_cluster_label = smallest_unused_label(uniq_labels)
+            uniq_labels = np.hstack((new_cluster_label, uniq_labels))
 
-            y_bar_var_s = np.array([(np.mean(self.obs[indices]), np.var(self.obs[indices]), len(indices))
-                                    if len(indices) > 0 else (0.0, 0.0, 0.0)
-                                    for label, indices in cluster_dict.iteritems()])
+            # compute the sufficient statistics of each cluster
+            logpost = np.empty((self.N, uniq_labels.shape[0]))
             
-            y_bar_s = y_bar_var_s[:,0]
-            var_s = y_bar_var_s[:,1]                
-            n_s = y_bar_var_s[:,2]
+            for label_index in xrange(uniq_labels.shape[0]):
+                label = uniq_labels[label_index]
+                if label == new_cluster_label:
+                    n, mu, var = 0, 0, 0
+                else:
+                    cluster_obs = self.obs[np.where(cluster_labels == label)]
+                    n = cluster_obs.shape[0]
+                    mu = np.mean(cluster_obs)
+                    var = np.var(cluster_obs)
 
-            k_n_s = self.gaussian_k0 + n_s
-            mu_n_s  = (self.gaussian_k0 * self.gaussian_mu0 + n_s * y_bar_s) / k_n_s
-            alpha_n_s = self.gamma_alpha0 + n_s / 2
-            beta_n_s = self.gamma_beta0 + 0.5 * var_s * n_s + \
-                       self.gaussian_k0 * n_s * (y_bar_s - self.gaussian_mu0) ** 2 / (2 * k_n_s)
-            Lambda_s = alpha_n_s * k_n_s / (beta_n_s * (k_n_s + 1))
-            loglik_s = np.empty((self.N, len(n_s)), np.float32)
+                k_n = self.gaussian_k0 + n
+                mu_n  = (self.gaussian_k0 * self.gaussian_mu0 + n * mu) / k_n
+                alpha_n = self.gamma_alpha0 + n / 2
+                beta_n = self.gamma_beta0 + 0.5 * var * n + \
+                    self.gaussian_k0 * n * (mu - self.gaussian_mu0) ** 2 / (2 * k_n)
+                Lambda = alpha_n * k_n / (beta_n * (k_n + 1))
             
-            for c in xrange(len(n_s)):
-                t_frozen = t(df = 2 * alpha_n_s[c], loc = mu_n_s[c], scale = (1 / Lambda_s[c]) ** 0.5)
-                loglik_s[:,c] = t_frozen.logpdf(self.obs[:1])
-                loglik_s[:,c] += np.log(n_s[c]) if n_s[c] > 0 else np.log(self.alpha)
+                t_frozen = t(df = 2 * alpha_n, loc = mu_n, scale = (1 / Lambda) ** 0.5)
+                logpost[:,label_index] = t_frozen.logpdf(self.obs[:,0])
+                logpost[:,label_index] += np.log(n/(self.N + self.alpha)) if n > 0 else np.log(self.alpha/(self.N+self.alpha))
             
             # sample and implement the changes
-            for j in xrange(self.N):
-                target_cluster = sample(a = cluster_dict.keys(), p = lognormalize(loglik_s[j]))
-                cluster_labels[j] = target_cluster
+            temp_cluster_labels = np.empty(cluster_labels.shape, dtype=np.int32)
+            for n in xrange(self.N):
+                target_cluster = sample(a = uniq_labels, p = lognormalize(logpost[n]))
+                temp_cluster_labels[n] = target_cluster
 
             if self.record_best:
-                self.auto_save_sample(cluster_labels)
+                if self.auto_save_sample(temp_cluster_labels):
+                    cluster_labels = temp_cluster_labels
                 
         if output_file is not None and self.record_best: 
             print(*self.best_sample[0], file = output_file, sep = ',')
 
         total_time += time() - a_time
-
         return -1.0, total_time, Counter(cluster_labels).most_common()
 
     def cl_infer_1dgaussian(self, init_labels, output_file = None):
@@ -130,7 +132,7 @@ class CollapsedGibbs(BaseSampler):
         if self.record_best:
             self.auto_save_sample(cluster_labels)
 
-        d_data = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = self.obs)
+        d_data = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = self.obs[:,0])
         d_labels = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = cluster_labels)
         
         if output_file is not None: print(*xrange(self.N), file = output_file, sep = ',')
@@ -222,11 +224,11 @@ class CollapsedGibbs(BaseSampler):
             a_time = time()
             if output_file is not None and i >= burnin: 
                 print(*cluster_labels, file = output_file, sep = ',')            
-            # at the beginning of each iteration, identity the unique cluster labels
+            # at the beginning of each iteration, identify the unique cluster labels
             uniq_labels = np.unique(cluster_labels)
             _, _, new_cluster_label = smallest_unused_label(uniq_labels)
             uniq_labels = np.hstack((new_cluster_label, uniq_labels))
-            num_of_clusters = uniq_labels.shape[0]
+            #num_of_clusters = uniq_labels.shape[0]
 
             # compute the sufficient statistics of each cluster
             n = np.empty(uniq_labels.shape)
