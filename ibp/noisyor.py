@@ -1,12 +1,11 @@
 #!/usr/bin/env python2
 #-*- coding: utf-8 -*-
 
-from __future__ import print_function
+from __future__ import print_function, division
 import sys, os.path, itertools, cPickle
 pkg_dir = os.path.dirname(os.path.realpath(__file__)) + '/../../'
 sys.path.append(pkg_dir)
 
-#import h5py
 import pyopencl.array
 from scipy.stats import poisson
 from MPBNP import *
@@ -16,11 +15,11 @@ np.set_printoptions(suppress=True)
 
 class Gibbs(BaseSampler):
 
-    def __init__(self, cl_mode = True, cl_device = None,
-                 alpha = 1.0, lam = 0.98, theta = 0.01, epislon = 0.02, init_k = 4):
+    def __init__(self, cl_mode = True, cl_device = None, record_best = True,
+                 alpha = 1.0, lam = 0.98, theta = 0.01, epislon = 0.02, init_k = 10):
         """Initialize the class.
         """
-        BaseSampler.__init__(self, cl_mode, cl_device)
+        BaseSampler.__init__(self, cl_mode = cl_mode, cl_device = cl_device, record_best = record_best)
 
         if cl_mode:
             program_str = open(pkg_dir + 'MPBNP/ibp/kernels/ibp_noisyor_cl.c', 'r').read()
@@ -83,19 +82,28 @@ class Gibbs(BaseSampler):
         cur_z = init_z
 
         a_time = time()
+        self.auto_save_sample(sample = (cur_y, cur_z))
         for i in xrange(self.niter):
-            cur_y = self._infer_y(cur_y, cur_z)
-            cur_y, cur_z = self._infer_z(cur_y, cur_z)
+            temp_cur_y = self._infer_y(cur_y, cur_z)
+            temp_cur_y, temp_cur_z = self._infer_z(temp_cur_y, cur_z)
             #self._sample_lam(cur_y, cur_z)
-            
-            if i >= self.burnin:
+
+            if self.record_best:
+                if self.auto_save_sample(sample = (temp_cur_y, temp_cur_z)):
+                    cur_y, cur_z = temp_cur_y, temp_cur_z
+            elif i >= self.burnin:
                 self.samples['z'].append(cur_z)
                 self.samples['y'].append(cur_y)
 
+                
         if output_file is not None:
-            cPickle.dump(self.samples, open(output_file, 'w'))                
+            if self.record_best:
+                print(*self.best_sample[0], file = output_file, sep = '\n')
+            else:
+                cPickle.dump(self.samples, open(output_file, 'w'))
 
-        return -1, time() - a_time, None
+        self.total_time += time() - a_time
+        return self.gpu_time, self.total_time, None
 
     def _infer_y(self, cur_y, cur_z):
         """Infer feature images
@@ -343,6 +351,26 @@ class Gibbs(BaseSampler):
         
         return cur_y_new, cur_z_new
 
+    def _logprob(self, sample):
+        """Calculate the joint log probability of data and model given a sample.
+        """
+        cur_y, cur_z = sample
+        log_prior = 0
+        log_lik = 0
+    
+        if not self.cl_mode:
+            for n in xrange(cur_z.shape[0]):
+                num_novel = 0
+                for k in xrange(cur_z.shape[1]):
+                    m = cur_z[:n,k].sum()
+                    if m > 0: log_prior += np.log(m / (n +1))
+                    else: num_novel += 1
+                if num_novel > 0:
+                    log_prior += poisson.pmf(num_novel, self.alpha / (n+1))
+            log_lik = self._loglik(cur_y = cur_y, cur_z = cur_z)
+        return log_prior + log_lik
+            
+    
 class GibbsPredictor(BasePredictor):
 
     def __init__(self, cl_mode = True, cl_device = None,

@@ -38,6 +38,8 @@ parser.add_argument('--kernel', choices=['noisyor', 'noisyortwoy-uniform', 'nois
 parser.add_argument('--iter', '-t', type=int, default=10000, help='The number of iterations the sampler should run')
 parser.add_argument('--burnin', '-b', type=int, default=2000, help='The number of iterations discarded as burn-in.')
 parser.add_argument('--output_to_file', action='store_true', help="Write posterior samples to a log file in the current directory. Default behavior is not keeping records of posterior samples")
+parser.add_argument('--output_to_stdout', action='store_true', help="Write posterior samples to standard output (i.e., your screen). Default behavior is not keeping records of posterior samples")
+parser.add_argument('--output_mode', choices=['best', 'all'], default='best', help='Output mode. Default is keeping only the sample that yields the highest logliklihood of data. The other option is to keep all samples.')
 parser.add_argument('--chain', '-c', type=int, default=1, help='The number of chains to run. Default is 1.')
 parser.add_argument('--distributed_chains', action='store_true', default=False, help="If there are multiple OpenCL devices, distribute chains across them. Default is no. Will not distribute to CPUs if GPU is specified in opencl_device, and vice versa")
 
@@ -52,7 +54,8 @@ output_path = os.path.dirname(os.path.realpath(args.data_file)) + '/'
 
 # set up the sampler
 if args.kernel == 'noisyor':
-    c = ibp.noisyor.Gibbs(cl_mode = args.opencl, cl_device = args.opencl_device)
+    c = ibp.noisyor.Gibbs(cl_mode = args.opencl, cl_device = args.opencl_device,
+                          record_best = args.output_mode == 'best')
 elif args.kernel == 'noisyortwoy-uniform':
     c = ibp.noisyortwoy.UniformGibbs(cl_mode = args.opencl, cl_device = args.opencl_device)
 elif args.kernel == 'noisyortwoy-biased':
@@ -69,6 +72,8 @@ for chain in xrange(args.chain):
             sample_dest = output_path + input_filename + '-%d-%s-chain-%d-cl.pickled' % (args.iter - args.burnin, args.kernel, chain + 1)
         else:
             sample_dest = output_path + input_filename + '-%d-%s-chain-%d-nocl.pickled' % (args.iter - args.burnin, args.kernel, chain + 1)
+    elif args.output_to_stdout:
+        sample_dest = sys.stdout
     else:
         sample_dest = None
 

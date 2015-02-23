@@ -121,7 +121,7 @@ class CollapsedGibbs(BaseSampler):
             print(*self.best_sample[0], file = output_file, sep = ',')
 
         self.total_time += time() - a_time
-        return -1.0, self.total_time, Counter(cluster_labels).most_common()
+        return self.gpu_time, self.total_time, Counter(cluster_labels).most_common()
 
     def cl_infer_1dgaussian(self, init_labels, output_file = None):
         """Implementing concurrent sampling of class labels with OpenCL.
@@ -386,15 +386,15 @@ class CollapsedGibbs(BaseSampler):
         return gpu_time, total_time, Counter(cluster_labels).most_common()
 
 
-    def _loglik(self, sample):
-        """Calculation the loglikelihood of data given a sample.
+    def _logprob(self, sample):
+        """Calculate the joint log probability of data and model given a sample.
         """
         assert(len(sample) == len(self.obs))
 
         try: dim = self.obs.shape[1]
         except IndexError: dim = 1
         
-        total_loglik = 0
+        total_logprob = 0
 
         if dim == 1 and self.cl_mode == False:
             cluster_dict = {}
@@ -424,7 +424,7 @@ class CollapsedGibbs(BaseSampler):
                 except KeyError: cluster_dict[label] = [obs]
                 N += 1
 
-                total_loglik += loglik
+                total_logprob += loglik
 
         if dim == 1 and self.cl_mode:
             gpu_a_time = time()
@@ -437,6 +437,6 @@ class CollapsedGibbs(BaseSampler):
             self.prg.joint_logprob(self.queue, self.obs.shape, None,
                                    d_labels, d_data, d_hyper_param, d_logprob.data)
             
-            total_loglik = d_logprob.get().sum()
+            total_logprob = d_logprob.get().sum()
             self.gpu_time += time() - gpu_a_time
-        return total_loglik
+        return total_logprob

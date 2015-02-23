@@ -119,24 +119,24 @@ class BaseSampler(object):
         """Save the given sample as the best sample if it yields
         a larger log-likelihood of data than the current best.
         """
-        new_loglik = self._loglik(sample)
+        new_logprob = self._logprob(sample)
         # if there's no best sample recorded yet
         if self.best_sample[0] is None and self.best_sample[1] is None:
-            self.best_sample = (sample, new_loglik)
+            self.best_sample = (sample, new_logprob)
             return
 
         # if there's a best sample
-        if new_loglik > self.best_sample[1]:
+        if new_logprob > self.best_sample[1]:
             self.no_improv = 0
-            self.best_diff.append(new_loglik - self.best_sample[1])
-            self.best_sample = (sample, new_loglik)
-            print('New best sample found, loglik: {0}'.format(new_loglik), file=sys.stderr)
+            self.best_diff.append(new_logprob - self.best_sample[1])
+            self.best_sample = (sample, new_logprob)
+            print('New best sample found, loglik: {0}'.format(new_logprob), file=sys.stderr)
             return True
         else:
             self.no_improv += 1
             return False
 
-    def _loglik(self, sample):
+    def _logprob(self, sample):
         """Compute the logliklihood of data given a sample. This method
         does nothing in the base class.
         """
