@@ -112,18 +112,20 @@ class CollapsedGibbs(BaseSampler):
             if self.record_best:
                 if self.auto_save_sample(temp_cluster_labels):
                     cluster_labels = temp_cluster_labels
+                if self.no_improv > 100 and np.mean(self.best_diff[:10]) < 0.01:
+                    break
+            else:
+                cluster_labels = temp_cluster_labels
                 
         if output_file is not None and self.record_best: 
             print(*self.best_sample[0], file = output_file, sep = ',')
 
-        total_time += time() - a_time
-        return -1.0, total_time, Counter(cluster_labels).most_common()
+        self.total_time += time() - a_time
+        return -1.0, self.total_time, Counter(cluster_labels).most_common()
 
     def cl_infer_1dgaussian(self, init_labels, output_file = None):
         """Implementing concurrent sampling of class labels with OpenCL.
         """
-        gpu_time, total_time = 0, 0
-
         d_hyper_param = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
                                   hostbuf = np.array([self.gaussian_mu0, self.gaussian_k0, 
                                                       self.gamma_alpha0, self.gamma_beta0, self.alpha]).astype(np.float32))
@@ -185,19 +187,22 @@ class CollapsedGibbs(BaseSampler):
 
             temp_cluster_labels = np.empty(cluster_labels.shape, dtype=np.int32)
             cl.enqueue_copy(self.queue, temp_cluster_labels, d_labels)
-            gpu_time += time() - gpu_a_time
+            self.gpu_time += time() - gpu_a_time
 
             if self.record_best:
                 if self.auto_save_sample(temp_cluster_labels):
                     cluster_labels = temp_cluster_labels
+                if self.no_improv > 500 or np.mean(self.best_diff[-10:]) < 1:
+                    print('Too little improvement in loglikelihood - Abort searching', file=sys.stderr)
+                    break                    
             else:
                 cluster_labels = temp_cluster_labels
 
         if output_file is not None and self.record_best: 
             print(*self.best_sample[0], file = output_file, sep = ',')
             
-        total_time = time() - total_a_time
-        return gpu_time, total_time, Counter(cluster_labels).most_common()
+        self.total_time += time() - total_a_time
+        return self.gpu_time, self.total_time, Counter(cluster_labels).most_common()
 
     def infer_kdgaussian(self, init_labels, output_file = None):
         """Implementing concurrent sampling of partition labels without OpenCL.
@@ -390,7 +395,7 @@ class CollapsedGibbs(BaseSampler):
         except IndexError: dim = 1
         
         total_loglik = 0
-        
+
         if dim == 1 and self.cl_mode == False:
             cluster_dict = {}
             N = 0
@@ -422,6 +427,7 @@ class CollapsedGibbs(BaseSampler):
                 total_loglik += loglik
 
         if dim == 1 and self.cl_mode:
+            gpu_a_time = time()
             d_data = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = self.obs[:,0])
             d_labels = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = sample)
             d_hyper_param = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
@@ -432,4 +438,5 @@ class CollapsedGibbs(BaseSampler):
                                    d_labels, d_data, d_hyper_param, d_logprob.data)
             
             total_loglik = d_logprob.get().sum()
+            self.gpu_time += time() - gpu_a_time
         return total_loglik

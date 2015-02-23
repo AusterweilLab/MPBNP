@@ -69,7 +69,7 @@ class BaseSampler(object):
             self.device = self.ctx.get_info(cl.context_info.DEVICES)[0]
             self.device_type = self.device.type
             self.device_compute_units = self.device.max_compute_units
-
+            
         self.cl_mode = cl_mode
         self.obs = []
         self.niter = 1000
@@ -78,7 +78,11 @@ class BaseSampler(object):
         self.N = 0 # number of data points
         self.best_sample = (None, None) # (sample, loglikelihood)
         self.record_best = record_best
-
+        self.best_diff = []
+        self.no_improv = 0
+        self.gpu_time = 0
+        self.total_time = 0
+        
     def read_csv(self, filepath, header = True):
         """Read data from a csv file.
         """
@@ -120,12 +124,17 @@ class BaseSampler(object):
         if self.best_sample[0] is None and self.best_sample[1] is None:
             self.best_sample = (sample, new_loglik)
             return
+
         # if there's a best sample
         if new_loglik > self.best_sample[1]:
+            self.no_improv = 0
+            self.best_diff.append(new_loglik - self.best_sample[1])
             self.best_sample = (sample, new_loglik)
             print('New best sample found, loglik: {0}'.format(new_loglik), file=sys.stderr)
             return True
-        return False
+        else:
+            self.no_improv += 1
+            return False
 
     def _loglik(self, sample):
         """Compute the logliklihood of data given a sample. This method

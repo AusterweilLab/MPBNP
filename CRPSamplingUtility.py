@@ -35,7 +35,7 @@ parser.add_argument('--opencl', action='store_true', help='Use OpenCL accelerati
 parser.add_argument('--opencl_device', choices=['ask', 'gpu', 'cpu'], default='ask', help='The device to use OpenCL acceleration on. Default behavior is asking the user (i.e., you).')
 parser.add_argument('--data_file', type=str, required=True)
 parser.add_argument('--kernel', choices=['gaussian', 'categorical'], default='gaussian', help='The distribution of each component. Default is gaussian/normal. Also supports categorical distributions')
-parser.add_argument('--iter', '-t', type=int, default=10000, help='The number of iterations the sampler should run')
+parser.add_argument('--iter', '-t', type=int, default=10000, help='The number of iterations the sampler should run. When only the best sample is recorded, this parameter is interpreted as the maximum number of iterations the sampler will run.')
 parser.add_argument('--burnin', '-b', type=int, default=2000, help='The number of iterations discarded as burn-in.')
 parser.add_argument('--output_mode', choices=['best', 'all'], default='best', help='Output mode. Default is keeping only the sample that yields the highest logliklihood of data. The other option is to keep all samples.')
 parser.add_argument('--output_to_file', action='store_true', help="Write posterior samples to a log file in the current directory. Default behavior is not keeping records of posterior samples")
