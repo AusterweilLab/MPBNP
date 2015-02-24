@@ -16,7 +16,7 @@ np.set_printoptions(suppress=True)
 class Gibbs(BaseSampler):
 
     def __init__(self, cl_mode = True, cl_device = None, record_best = True,
-                 alpha = 1.0, lam = 0.98, theta = 0.01, epislon = 0.02, init_k = 4):
+                 alpha = 2.0, lam = 0.98, theta = 0.01, epislon = 0.02, init_k = 4):
         """Initialize the class.
         """
         BaseSampler.__init__(self, cl_mode = cl_mode, cl_device = cl_device, record_best = record_best)
@@ -30,7 +30,6 @@ class Gibbs(BaseSampler):
         self.theta = theta # prior probability that a pixel is on in a feature image
         self.lam = lam # effecacy of a feature
         self.epislon = epislon # probability that a pixel is on by change in an actual image
-        
         self.samples = {'z': [], 'y': []} # sample storage, to be pickled
 
     def read_csv(self, filepath, header=True):
@@ -92,20 +91,15 @@ class Gibbs(BaseSampler):
                 if self.auto_save_sample(sample = (temp_cur_y, temp_cur_z)):
                     cur_y, cur_z = temp_cur_y, temp_cur_z
             elif i >= self.burnin:
+                cur_y, cur_z = temp_cur_y, temp_cur_z
                 self.samples['z'].append(cur_z)
                 self.samples['y'].append(cur_y)
 
-        # delete null features
-        active_feat_col = np.where(cur_z.sum(axis = 0) > 0)
-        cur_z = cur_z[:,active_feat_col[0]]
-        cur_y = cur_y[active_feat_col[0],:]
-
         # delete empty feature images
-        non_empty_feat_img = np.where(cur_y.sum(axis = 1) > 0)
-        cur_y = cur_y[non_empty_feat_img[0],:]
-        cur_z = cur_z[:,non_empty_feat_img[0]]
-        self.auto_save_sample(sample = (cur_y, cur_z))
-        
+        #non_empty_feat_img = np.where(cur_y.sum(axis = 1) > 0)
+        #cur_y = cur_y[non_empty_feat_img[0],:]
+        #cur_z = cur_z[:,non_empty_feat_img[0]]
+                    
         if output_file is not None:
             if self.record_best:
                 print(*self.best_sample[0], file = output_file, sep = '\n')
@@ -130,9 +124,9 @@ class Gibbs(BaseSampler):
             for col in xrange(cur_y.shape[1]):
                 old_value = cur_y[row, col]
                 cur_y[row, col] = 1
-                on_loglik[row, col] = self._loglik_nth(cur_y, cur_z, n = affected_data_index)
+                on_loglik[row, col] = self._loglik(cur_y, cur_z)#self._loglik_nth(cur_y, cur_z, n = affected_data_index)
                 cur_y[row, col] = 0
-                off_loglik[row, col] = self._loglik_nth(cur_y, cur_z, n = affected_data_index)
+                off_loglik[row, col] = self._loglik(cur_y, cur_z)#self._loglik_nth(cur_y, cur_z, n = affected_data_index)
                 cur_y[row, col] = old_value
 
         # add to the prior
@@ -180,6 +174,11 @@ class Gibbs(BaseSampler):
         k_new = self._sample_k_new(cur_y, cur_z)
         if k_new:
             cur_y, cur_z = k_new
+
+        # delete null features
+        active_feat_col = np.where(cur_z.sum(axis = 0) > 0)
+        cur_z = cur_z[:,active_feat_col[0]]
+        cur_y = cur_y[active_feat_col[0],:]
         
         # update self.k
         self.k = cur_z.shape[1]
@@ -206,15 +205,17 @@ class Gibbs(BaseSampler):
         cur_z_new[:, [xrange(-k_new_count,0)]] = 1
         # propose feature images by sampling from the prior distribution
         cur_y_new = np.vstack((cur_y, np.random.binomial(1, self.theta, (k_new_count, self.d))))
+        cur_y_new = self._infer_y(cur_y_new, cur_z_new)
     
-        new_loglik = self._loglik(cur_y_new, cur_z_new)
+        return cur_y_new.astype(np.int32), cur_z_new.astype(np.int32)
+        #new_loglik = self._loglik(cur_y_new, cur_z_new)
         # normalization
-        max_loglik = max(new_loglik, old_loglik)
-        new_loglik -= max_loglik
-        old_loglik -= max_loglik
-        move_prob = 1 / (1 + np.exp(old_loglik - new_loglik));
-        if random.random() < move_prob:
-            return cur_y_new.astype(np.int32), cur_z_new.astype(np.int32)
+        #max_loglik = max(new_loglik, old_loglik)
+        #new_loglik -= max_loglik
+        #old_loglik -= max_loglik
+        #move_prob = 1 / (1 + np.exp(old_loglik - new_loglik));
+        #if random.random() < move_prob:
+            #return cur_y_new.astype(np.int32), cur_z_new.astype(np.int32)
         return False
 
     def _sample_lam(self, cur_y, cur_z):
