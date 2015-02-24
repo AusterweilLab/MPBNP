@@ -16,7 +16,7 @@ np.set_printoptions(suppress=True)
 class Gibbs(BaseSampler):
 
     def __init__(self, cl_mode = True, cl_device = None, record_best = True,
-                 alpha = 1.0, lam = 0.98, theta = 0.01, epislon = 0.02, init_k = 10):
+                 alpha = 1.0, lam = 0.98, theta = 0.01, epislon = 0.02, init_k = 4):
         """Initialize the class.
         """
         BaseSampler.__init__(self, cl_mode = cl_mode, cl_device = cl_device, record_best = record_best)
@@ -95,7 +95,17 @@ class Gibbs(BaseSampler):
                 self.samples['z'].append(cur_z)
                 self.samples['y'].append(cur_y)
 
-                
+        # delete null features
+        active_feat_col = np.where(cur_z.sum(axis = 0) > 0)
+        cur_z = cur_z[:,active_feat_col[0]]
+        cur_y = cur_y[active_feat_col[0],:]
+
+        # delete empty feature images
+        non_empty_feat_img = np.where(cur_y.sum(axis = 1) > 0)
+        cur_y = cur_y[non_empty_feat_img[0],:]
+        cur_z = cur_z[:,non_empty_feat_img[0]]
+        self.auto_save_sample(sample = (cur_y, cur_z))
+        
         if output_file is not None:
             if self.record_best:
                 print(*self.best_sample[0], file = output_file, sep = '\n')
@@ -170,11 +180,6 @@ class Gibbs(BaseSampler):
         k_new = self._sample_k_new(cur_y, cur_z)
         if k_new:
             cur_y, cur_z = k_new
-
-        # delete null features
-        active_feat_col = np.where(cur_z.sum(axis = 0) > 0)
-        cur_z = cur_z[:,active_feat_col[0]]
-        cur_y = cur_y[active_feat_col[0],:]
         
         # update self.k
         self.k = cur_z.shape[1]
@@ -262,7 +267,7 @@ class Gibbs(BaseSampler):
         loglik_mat = np.log(np.abs(self.obs - not_on_p))
         return loglik_mat.sum()
 
-    def _cl_infer_yz(self, init_y, init_z, output_y_file = None, output_z_file = None):
+    def _cl_infer_yz(self, init_y, init_z, output_file = None):
         """Wrapper function to start the inference on y and z.
         This function is not supposed to directly invoked by an end user.
         @param init_y: Passed in from do_inference()
@@ -272,17 +277,29 @@ class Gibbs(BaseSampler):
         cur_z = init_z.astype(np.int32)
         d_obs = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf=self.obs.astype(np.int32))
 
-        gpu_time = 0
-        total_time = 0
+        self.auto_save_sample(sample = (cur_y, cur_z))
         for i in xrange(self.niter):
             a_time = time()
-            cur_y = self._cl_infer_y(cur_y, cur_z, d_obs)
-            cur_z = self._cl_infer_z(cur_y, cur_z, d_obs)
-            gpu_time += time() - a_time
-            cur_y, cur_z = self._cl_infer_k_new(cur_y, cur_z)
-            total_time += time() - a_time
+            temp_cur_y = self._cl_infer_y(cur_y, cur_z, d_obs)
+            temp_cur_z = self._cl_infer_z(temp_cur_y, cur_z, d_obs)
+            self.gpu_time += time() - a_time
+            temp_cur_y, temp_cur_z = self._cl_infer_k_new(temp_cur_y, temp_cur_z)
+            self.total_time += time() - a_time
 
-        return gpu_time, total_time, None
+            if self.record_best:
+                if self.auto_save_sample(sample = (temp_cur_y, temp_cur_z)):
+                    cur_y, cur_z = temp_cur_y, temp_cur_z
+            elif i >= self.burnin:
+                self.samples['z'].append(cur_z)
+                self.samples['y'].append(cur_y)
+
+        if output_file is not None:
+            if self.record_best:
+                print(*self.best_sample[0], file = output_file, sep = '\n')
+            else:
+                cPickle.dump(self.samples, open(output_file, 'w'))
+
+        return self.gpu_time, self.total_time, None
 
     def _cl_infer_y(self, cur_y, cur_z, d_obs):
         """Infer feature images
@@ -358,7 +375,8 @@ class Gibbs(BaseSampler):
         log_prior = 0
         log_lik = 0
     
-        if not self.cl_mode:
+        if not self.cl_mode or self.cl_mode:
+            # calculate the prior probability of Z
             for n in xrange(cur_z.shape[0]):
                 num_novel = 0
                 for k in xrange(cur_z.shape[1]):
@@ -367,6 +385,11 @@ class Gibbs(BaseSampler):
                     else: num_novel += 1
                 if num_novel > 0:
                     log_prior += poisson.pmf(num_novel, self.alpha / (n+1))
+            # calculate the prior probability of Y
+            num_on = (cur_y == 1).sum()
+            num_off = (cur_y == 0).sum()
+            log_prior += num_on * np.log(self.theta) + num_off * np.log(1 - self.theta)
+            # calculate the logliklihood
             log_lik = self._loglik(cur_y = cur_y, cur_z = cur_z)
         return log_prior + log_lik
             
