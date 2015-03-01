@@ -1,6 +1,7 @@
 #!/usr/bin/env python2
 #-*-coding: utf-8 -*-
-from __future__ import print_function
+
+from __future__ import print_function, division
 
 import sys, os.path
 pkg_dir = os.path.dirname(os.path.realpath(__file__)) + '/../'

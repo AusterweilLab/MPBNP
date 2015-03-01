@@ -16,7 +16,7 @@ np.set_printoptions(suppress=True)
 class Gibbs(BaseSampler):
 
     def __init__(self, cl_mode = True, cl_device = None, record_best = True,
-                 alpha = 2.0, lam = 0.98, theta = 0.01, epislon = 0.02, init_k = 4):
+                 alpha = None, lam = 0.98, theta = 0.1, epislon = 0.02, init_k = 10):
         """Initialize the class.
         """
         BaseSampler.__init__(self, cl_mode = cl_mode, cl_device = cl_device, record_best = record_best)
@@ -42,6 +42,7 @@ class Gibbs(BaseSampler):
             self.new_obs.append([int(_) for _ in row])
         self.obs = np.array(self.new_obs)
         self.d = len(self.obs[0])
+        self.alpha = self.N
         return
 
     def direct_read_obs(self, obs):
@@ -102,7 +103,10 @@ class Gibbs(BaseSampler):
                     
         if output_file is not None:
             if self.record_best:
-                print(*self.best_sample[0], file = output_file, sep = '\n')
+                # print out the Y matrix
+                final_y, final_z = self.best_sample[0]
+                print(final_y, file = output_file)
+                print(final_z, file = output_file)
             else:
                 cPickle.dump(self.samples, open(output_file, 'w'))
 
@@ -124,9 +128,9 @@ class Gibbs(BaseSampler):
             for col in xrange(cur_y.shape[1]):
                 old_value = cur_y[row, col]
                 cur_y[row, col] = 1
-                on_loglik[row, col] = self._loglik(cur_y, cur_z)#self._loglik_nth(cur_y, cur_z, n = affected_data_index)
+                on_loglik[row, col] = self._loglik_nth(cur_y, cur_z, n = affected_data_index)
                 cur_y[row, col] = 0
-                off_loglik[row, col] = self._loglik(cur_y, cur_z)#self._loglik_nth(cur_y, cur_z, n = affected_data_index)
+                off_loglik[row, col] = self._loglik_nth(cur_y, cur_z, n = affected_data_index)
                 cur_y[row, col] = old_value
 
         # add to the prior
@@ -153,7 +157,7 @@ class Gibbs(BaseSampler):
         m_minus = z_col_sum - cur_z
         on_prob = m_minus / N
         off_prob = 1 - m_minus / N
-
+        
         # add loglikelihood of data
         for row in xrange(cur_z.shape[0]):
             for col in xrange(cur_z.shape[1]):
@@ -174,11 +178,19 @@ class Gibbs(BaseSampler):
         k_new = self._sample_k_new(cur_y, cur_z)
         if k_new:
             cur_y, cur_z = k_new
+        
+        # delete empty feature images
+        non_empty_feat_img = np.where(cur_y.sum(axis = 1) > 0)
+        cur_y = cur_y[non_empty_feat_img[0],:]
+        cur_z = cur_z[:,non_empty_feat_img[0]]
 
         # delete null features
         active_feat_col = np.where(cur_z.sum(axis = 0) > 0)
         cur_z = cur_z[:,active_feat_col[0]]
         cur_y = cur_y[active_feat_col[0],:]
+
+        # the above two steps need to be done before sampling new features
+        # because new features are initialized randomly
         
         # update self.k
         self.k = cur_z.shape[1]
@@ -201,22 +213,12 @@ class Gibbs(BaseSampler):
         if k_new_count == 0: return False
             
         # modify the feature ownership matrix
-        cur_z_new = np.hstack((cur_z, np.zeros((cur_z.shape[0], k_new_count), dtype=np.int32)))
-        cur_z_new[:, [xrange(-k_new_count,0)]] = 1
+        cur_z_new = np.hstack((cur_z, np.random.randint(0, 2, size = (cur_z.shape[0], k_new_count))))
+        #cur_z_new[:, [xrange(-k_new_count,0)]] = 1
         # propose feature images by sampling from the prior distribution
         cur_y_new = np.vstack((cur_y, np.random.binomial(1, self.theta, (k_new_count, self.d))))
-        cur_y_new = self._infer_y(cur_y_new, cur_z_new)
-    
+        
         return cur_y_new.astype(np.int32), cur_z_new.astype(np.int32)
-        #new_loglik = self._loglik(cur_y_new, cur_z_new)
-        # normalization
-        #max_loglik = max(new_loglik, old_loglik)
-        #new_loglik -= max_loglik
-        #old_loglik -= max_loglik
-        #move_prob = 1 / (1 + np.exp(old_loglik - new_loglik));
-        #if random.random() < move_prob:
-            #return cur_y_new.astype(np.int32), cur_z_new.astype(np.int32)
-        return False
 
     def _sample_lam(self, cur_y, cur_z):
         """Resample the value of lambda.
@@ -375,6 +377,7 @@ class Gibbs(BaseSampler):
         cur_y, cur_z = sample
         log_prior = 0
         log_lik = 0
+        if cur_z.shape[1] == 0: return -99999999.9
     
         if not self.cl_mode or self.cl_mode:
             # calculate the prior probability of Z
@@ -382,10 +385,12 @@ class Gibbs(BaseSampler):
                 num_novel = 0
                 for k in xrange(cur_z.shape[1]):
                     m = cur_z[:n,k].sum()
-                    if m > 0: log_prior += np.log(m / (n +1))
+                    if m > 0:
+                        if cur_z[n,k] == 1: log_prior += np.log(m / (n+1))
+                        else: log_prior += np.log(1 - m / (n + 1))
                     else: num_novel += 1
                 if num_novel > 0:
-                    log_prior += poisson.pmf(num_novel, self.alpha / (n+1))
+                    log_prior += poisson.logpmf(num_novel, self.alpha / (n+1))
             # calculate the prior probability of Y
             num_on = (cur_y == 1).sum()
             num_off = (cur_y == 0).sum()
