@@ -129,7 +129,7 @@ class BaseSampler(object):
         if new_logprob > self.best_sample[1]:
             self.no_improv = 0
             self.best_diff.append(new_logprob - self.best_sample[1])
-            self.best_sample = (sample, new_logprob)
+            self.best_sample = (copy.deepcopy(sample), new_logprob)
             print('New best sample found, loglik: {0}'.format(new_logprob), file=sys.stderr)
             return True
         else:

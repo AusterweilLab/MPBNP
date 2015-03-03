@@ -144,3 +144,29 @@ kernel void sample_z(global int *cur_y,
   cur_z[nth * K + kth] = sample(2, labels, post, 0, rand[nth * K + kth]);
   //printf("index: %d after %f %f %d \n", nth * K + kth, post[0], post[1], cur_z[nth * K + kth]);
 }
+
+kernel void logprob_z(global int *cur_z,
+		      global float *logprob_z,
+		      global int *novel_f,
+		      uint N, uint K,
+		      float alpha) {
+
+  uint nth = get_global_id(0); // n is the index of data
+  uint kth = get_global_id(1); // k is the index of features
+
+  uint m = 0;
+  for (int i = 0; i < nth; i++) {
+    m += (cur_z[i * K + kth] == 1);
+  }
+  if (m > 0) {
+    novel_f[nth * K + kth] = 0;
+    if (cur_z[nth * K + kth] == 1) {
+      logprob_z[nth * K + kth] = log(m / (nth + 1.0f));
+    } else {
+      logprob_z[nth * K + kth] = log(1 - m / (nth + 1.0f));
+    }
+  } else {
+    logprob_z[nth * K + kth] = 0;
+    novel_f[nth * K + kth] = (cur_z[nth * K + kth] == 1);
+  }
+}

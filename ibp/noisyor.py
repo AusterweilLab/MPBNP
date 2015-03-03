@@ -287,18 +287,23 @@ class Gibbs(BaseSampler):
             temp_cur_z = self._cl_infer_z(temp_cur_y, cur_z, d_obs)
             self.gpu_time += time() - a_time
             temp_cur_y, temp_cur_z = self._cl_infer_k_new(temp_cur_y, temp_cur_z)
-            self.total_time += time() - a_time
 
             if self.record_best:
                 if self.auto_save_sample(sample = (temp_cur_y, temp_cur_z)):
                     cur_y, cur_z = temp_cur_y, temp_cur_z
             elif i >= self.burnin:
+                cur_y, cur_z = temp_cur_y, temp_cur_z
                 self.samples['z'].append(cur_z)
                 self.samples['y'].append(cur_y)
 
+            self.total_time += time() - a_time
+
         if output_file is not None:
             if self.record_best:
-                print(*self.best_sample[0], file = output_file, sep = '\n')
+                # print out the Y matrix
+                final_y, final_z = self.best_sample[0]
+                print(final_y, file = output_file)
+                print(final_z, file = output_file)
             else:
                 cPickle.dump(self.samples, open(output_file, 'w'))
 
@@ -338,8 +343,7 @@ class Gibbs(BaseSampler):
 
         # calculate the prior probability that a pixel is on
         self.prg.sample_z(self.queue, cur_z.shape, None,
-                          d_cur_y, d_cur_z, d_z_by_y, d_z_col_sum, d_obs,
-                          d_rand, #d_z_on_loglik.data, d_z_off_loglik.data,
+                          d_cur_y, d_cur_z, d_z_by_y, d_z_col_sum, d_obs, d_rand, 
                           np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_z.shape[1]),
                           np.float32(self.lam), np.float32(self.epislon), np.float32(self.theta))
 
@@ -379,7 +383,28 @@ class Gibbs(BaseSampler):
         log_lik = 0
         if cur_z.shape[1] == 0: return -99999999.9
     
-        if not self.cl_mode or self.cl_mode:
+        if self.cl_mode:
+            a_time = time()
+            d_cur_z = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = cur_z.astype(np.int32))
+            d_logprob_z = cl.array.empty(self.queue, cur_z.shape, np.float32)
+            d_novel_f = cl.array.empty(self.queue, cur_z.shape, np.int32)
+
+            self.prg.logprob_z(self.queue, cur_z.shape, None, 
+                               d_cur_z, d_logprob_z.data, d_novel_f.data,
+                               np.int32(self.N), np.int32(cur_z.shape[1]), np.float32(self.alpha))
+            log_prior = d_logprob_z.get().sum()
+            novel_counts = poisson.logpmf(d_novel_f.get().sum(axis = 1), self.alpha / np.arange(1, cur_z.shape[0]+1))
+            log_prior += novel_counts[np.where(d_novel_f.get() > 0)[0]].sum()
+            self.gpu_time += time() - a_time
+
+            # calculate the prior probability of Y
+            num_on = (cur_y == 1).sum()
+            num_off = (cur_y == 0).sum()
+            log_prior += num_on * np.log(self.theta) + num_off * np.log(1 - self.theta)
+            # calculate the logliklihood
+            log_lik = self._loglik(cur_y = cur_y, cur_z = cur_z)
+
+        else:
             # calculate the prior probability of Z
             for n in xrange(cur_z.shape[0]):
                 num_novel = 0
@@ -388,7 +413,8 @@ class Gibbs(BaseSampler):
                     if m > 0:
                         if cur_z[n,k] == 1: log_prior += np.log(m / (n+1))
                         else: log_prior += np.log(1 - m / (n + 1))
-                    else: num_novel += 1
+                    else: 
+                        if cur_z[n,k] == 1: num_novel += 1
                 if num_novel > 0:
                     log_prior += poisson.logpmf(num_novel, self.alpha / (n+1))
             # calculate the prior probability of Y
