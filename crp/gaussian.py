@@ -112,8 +112,8 @@ class CollapsedGibbs(BaseSampler):
             if self.record_best:
                 if self.auto_save_sample(temp_cluster_labels):
                     cluster_labels = temp_cluster_labels
-                if self.no_improv > 100 and np.mean(self.best_diff[:10]) < 0.01:
-                    break
+                if self.no_improvement():
+                    break                    
             else:
                 cluster_labels = temp_cluster_labels
                 
@@ -192,9 +192,9 @@ class CollapsedGibbs(BaseSampler):
             if self.record_best:
                 if self.auto_save_sample(temp_cluster_labels):
                     cluster_labels = temp_cluster_labels
-                if self.no_improv > 500 or np.mean(self.best_diff[-10:]) < 1:
-                    print('Too little improvement in loglikelihood - Abort searching', file=sys.stderr)
+                if self.no_improvement():
                     break                    
+
             else:
                 cluster_labels = temp_cluster_labels
 

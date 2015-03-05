@@ -16,7 +16,7 @@ np.set_printoptions(suppress=True)
 class Gibbs(BaseSampler):
 
     def __init__(self, cl_mode = True, cl_device = None, record_best = True,
-                 alpha = None, lam = 0.98, theta = 0.1, epislon = 0.02, init_k = 10):
+                 alpha = None, lam = 0.98, theta = 0.2, epislon = 0.02, init_k = 10):
         """Initialize the class.
         """
         BaseSampler.__init__(self, cl_mode = cl_mode, cl_device = cl_device, record_best = record_best)
@@ -41,6 +41,9 @@ class Gibbs(BaseSampler):
         for row in self.obs:
             self.new_obs.append([int(_) for _ in row])
         self.obs = np.array(self.new_obs)
+        if self.cl_mode:
+            self.d_obs = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf=self.obs.astype(np.int32))
+
         self.d = len(self.obs[0])
         self.alpha = self.N
         return
@@ -91,16 +94,14 @@ class Gibbs(BaseSampler):
             if self.record_best:
                 if self.auto_save_sample(sample = (temp_cur_y, temp_cur_z)):
                     cur_y, cur_z = temp_cur_y, temp_cur_z
+                if self.no_improvement():
+                    break                    
+                
             elif i >= self.burnin:
                 cur_y, cur_z = temp_cur_y, temp_cur_z
                 self.samples['z'].append(cur_z)
                 self.samples['y'].append(cur_y)
 
-        # delete empty feature images
-        #non_empty_feat_img = np.where(cur_y.sum(axis = 1) > 0)
-        #cur_y = cur_y[non_empty_feat_img[0],:]
-        #cur_z = cur_z[:,non_empty_feat_img[0]]
-                    
         if output_file is not None:
             if self.record_best:
                 # print out the Y matrix
@@ -283,19 +284,24 @@ class Gibbs(BaseSampler):
         self.auto_save_sample(sample = (cur_y, cur_z))
         for i in xrange(self.niter):
             a_time = time()
+            #print('before:', cur_z, cur_y)
             temp_cur_y = self._cl_infer_y(cur_y, cur_z, d_obs)
             temp_cur_z = self._cl_infer_z(temp_cur_y, cur_z, d_obs)
             self.gpu_time += time() - a_time
             temp_cur_y, temp_cur_z = self._cl_infer_k_new(temp_cur_y, temp_cur_z)
+            #print('after:', temp_cur_z)
 
             if self.record_best:
                 if self.auto_save_sample(sample = (temp_cur_y, temp_cur_z)):
                     cur_y, cur_z = temp_cur_y, temp_cur_z
+                if self.no_improvement():
+                    break                    
             elif i >= self.burnin:
                 cur_y, cur_z = temp_cur_y, temp_cur_z
                 self.samples['z'].append(cur_z)
                 self.samples['y'].append(cur_y)
-
+            #raw_input()
+            
             self.total_time += time() - a_time
 
         if output_file is not None:
@@ -357,23 +363,28 @@ class Gibbs(BaseSampler):
         if k_new:
             cur_y, cur_z = k_new
 
+        # delete empty feature images
+        non_empty_feat_img = np.where(cur_y.sum(axis = 1) > 0)
+        cur_y = cur_y[non_empty_feat_img[0],:].astype(np.int32)
+        cur_z = cur_z[:,non_empty_feat_img[0]].astype(np.int32)
+            
         # delete null features
         inactive_feat_col = np.where(cur_z.sum(axis = 0) == 0)
-        cur_z_new = np.delete(cur_z, inactive_feat_col[0], axis=1).astype(np.int32)
-        cur_y_new = np.delete(cur_y, inactive_feat_col[0], axis=0).astype(np.int32)
+        cur_z = np.delete(cur_z, inactive_feat_col[0], axis=1).astype(np.int32)
+        cur_y = np.delete(cur_y, inactive_feat_col[0], axis=0).astype(np.int32)
+            
+        z_s0, z_s1 = cur_z.shape
+        cur_z = cur_z.reshape((z_s0 * z_s1, 1))
+        cur_z = cur_z.reshape((z_s0, z_s1))
 
-        z_new_s0, z_new_s1 = cur_z_new.shape
-        cur_z_new = cur_z_new.reshape((z_new_s0 * z_new_s1, 1))
-        cur_z_new = cur_z_new.reshape((z_new_s0, z_new_s1))
-
-        y_new_s0, y_new_s1 = cur_y_new.shape
-        cur_y_new = cur_y_new.reshape((y_new_s0 * y_new_s1, 1))
-        cur_y_new = cur_y_new.reshape((y_new_s0, y_new_s1))
+        y_s0, y_s1 = cur_y.shape
+        cur_y = cur_y.reshape((y_s0 * y_s1, 1))
+        cur_y = cur_y.reshape((y_s0, y_s1))
 
         # update self.k
-        self.k = cur_z_new.shape[1]
+        self.k = cur_z.shape[1]
         
-        return cur_y_new, cur_z_new
+        return cur_y, cur_z
 
     def _logprob(self, sample):
         """Calculate the joint log probability of data and model given a sample.
@@ -386,23 +397,21 @@ class Gibbs(BaseSampler):
         if self.cl_mode:
             a_time = time()
             d_cur_z = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = cur_z.astype(np.int32))
-            d_logprob_z = cl.array.empty(self.queue, cur_z.shape, np.float32)
-            d_novel_f = cl.array.empty(self.queue, cur_z.shape, np.int32)
+            d_cur_y = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = cur_y.astype(np.int32))
+            d_logprob = cl.array.empty(self.queue, (cur_z.shape[0],), np.float32)
+            #d_novel_f = cl.array.empty(self.queue, cur_z.shape, np.int32)
 
-            self.prg.logprob_z(self.queue, cur_z.shape, None, 
-                               d_cur_z, d_logprob_z.data, d_novel_f.data,
-                               np.int32(self.N), np.int32(cur_z.shape[1]), np.float32(self.alpha))
-            log_prior = d_logprob_z.get().sum()
-            novel_counts = poisson.logpmf(d_novel_f.get().sum(axis = 1), self.alpha / np.arange(1, cur_z.shape[0]+1))
-            log_prior += novel_counts[np.where(d_novel_f.get() > 0)[0]].sum()
+            self.prg.logprob_z_data(self.queue, (cur_z.shape[0],), None, 
+                                    d_cur_z, d_cur_y, self.d_obs, d_logprob.data, #d_novel_f.data,
+                                    np.int32(self.N), np.int32(cur_y.shape[1]), np.int32(cur_z.shape[1]), 
+                                    np.float32(self.alpha), np.float32(self.lam), np.float32(self.epislon))
+            log_lik = d_logprob.get().sum()
             self.gpu_time += time() - a_time
 
             # calculate the prior probability of Y
             num_on = (cur_y == 1).sum()
             num_off = (cur_y == 0).sum()
-            log_prior += num_on * np.log(self.theta) + num_off * np.log(1 - self.theta)
-            # calculate the logliklihood
-            log_lik = self._loglik(cur_y = cur_y, cur_z = cur_z)
+            log_prior = num_on * np.log(self.theta) + num_off * np.log(1 - self.theta)
 
         else:
             # calculate the prior probability of Z
@@ -411,12 +420,12 @@ class Gibbs(BaseSampler):
                 for k in xrange(cur_z.shape[1]):
                     m = cur_z[:n,k].sum()
                     if m > 0:
-                        if cur_z[n,k] == 1: log_prior += np.log(m / (n+1))
-                        else: log_prior += np.log(1 - m / (n + 1))
+                        if cur_z[n,k] == 1: log_prior += np.log(m / (n+1.0))
+                        else: log_prior += np.log(1 - m / (n + 1.0))
                     else: 
                         if cur_z[n,k] == 1: num_novel += 1
                 if num_novel > 0:
-                    log_prior += poisson.logpmf(num_novel, self.alpha / (n+1))
+                    log_prior += poisson.logpmf(num_novel, self.alpha / (n+1.0))
             # calculate the prior probability of Y
             num_on = (cur_y == 1).sum()
             num_off = (cur_y == 0).sum()

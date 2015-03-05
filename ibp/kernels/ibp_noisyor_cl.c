@@ -1,3 +1,15 @@
+float lfactorial (int x) {
+  float lfac = 0;
+  for (int i = 2; i <= x; i++) {
+    lfac += log((float)i);
+  }
+  return lfac;
+}
+
+float pois_logpmf(int k, float lambda) {
+  return k * log(lambda) - lambda - lfactorial(k);
+}
+
 float max_arr(float *arr, int start, int length) {
   float result = arr[start];
   for (int i = start + 1; i < start + length; i++) {
@@ -52,12 +64,12 @@ int sample(uint a_size,  uint *a, float *p, int start, float rand) {
 }
 
 kernel void sample_y(global int *cur_y,
-		       global int *cur_z,
-		       global int *z_by_y,
-		       global int *obs,
+		     global int *cur_z,
+		     global int *z_by_y,
+		     global int *obs,
 		     global float *rand, //global float *on_loglik, global float *off_loglik,
-		       uint N, uint D, uint K,
-		       float lambda, float epislon, float theta) {
+		     uint N, uint D, uint K,
+		     float lambda, float epislon, float theta) {
   
   uint kth = get_global_id(0); // k is the index of features
   uint dth = get_global_id(1); // d is the index of pixels
@@ -65,7 +77,7 @@ kernel void sample_y(global int *cur_y,
   //printf("kth: %d, D: %d, dth: %d\n", kth, D, dth);
   float on_loglik_temp = log(theta); 
   float off_loglik_temp = log(1 - theta);
-
+  
   // extremely hackish way to calculate the loglikelihood
   for (int n = 0; n < N; n++) {
     // if the nth object has the kth feature
@@ -77,7 +89,7 @@ kernel void sample_y(global int *cur_y,
 	  on_loglik_temp += log(1 - pow(1 - lambda, z_by_y[n * D + dth]) * (1 - epislon));
 	  off_loglik_temp += log(1 - pow(1 - lambda, z_by_y[n * D + dth] - 1) * (1 - epislon));
 	} else {
-	  on_loglik_temp += log(1 - pow(1 - lambda, z_by_y[n * D + dth]+1) * (1 - epislon));
+	  on_loglik_temp += log(1 - pow(1 - lambda, z_by_y[n * D + dth] + 1) * (1 - epislon));
 	  off_loglik_temp += log(1 - pow(1 - lambda, z_by_y[n * D + dth]) * (1 - epislon));
 	}
       } else {
@@ -86,15 +98,11 @@ kernel void sample_y(global int *cur_y,
       }
     } 
   }
-  //off_loglik[kth * D + dth] = off_loglik_temp;
-  //on_loglik[kth * D + dth] = on_loglik_temp;
-  
   float logpost[2] = {on_loglik_temp, off_loglik_temp};
   uint labels[2] = {1, 0};
   lognormalize(logpost, 0, 2);
   cur_y[kth * D + dth] = sample(2, labels, logpost, 0, rand[kth * D + dth]);
   //printf("%f %f %d \n", logpost[0], logpost[1], cur_y[kth * D + dth]);
-
 }
 
 kernel void sample_z(global int *cur_y,
@@ -108,14 +116,14 @@ kernel void sample_z(global int *cur_y,
   
   uint nth = get_global_id(0); // n is the index of data
   uint kth = get_global_id(1); // k is the index of features
-
+  
   // calculate the prior probability of each cell is 1
   float on_prob_temp = (z_col_sum[kth] - cur_z[nth * K + kth]) / (float)N; 
-  float off_prob_temp = 1 - on_prob_temp;
-
+  float off_prob_temp = 1 - (z_col_sum[kth] - cur_z[nth * K + kth]) / (float)N;
+  
   int d;
-
-  // extremely hackish way to calculate the loglikelihood
+  
+  // extremely hackish way to calculate the probelihood
   for (d = 0; d < D; d++) {
     // if the kth feature can turn on a pixel at d
     if (cur_y[kth * K + d] == 1) {
@@ -123,8 +131,8 @@ kernel void sample_z(global int *cur_y,
       if (obs[nth * D + d] == 1) {
 	// if the nth object previously has the kth feature
 	if (cur_z[nth * K + kth] == 1) {
-	  on_prob_temp *= 1 - pow(1 - lambda, z_by_y[nth * D + d]) * (1 - epislon);
-	  off_prob_temp *= 1 - pow(1 - lambda, z_by_y[nth * D + d] - 1) * (1 - epislon);
+	on_prob_temp *= 1 - pow(1 - lambda, z_by_y[nth * D + d]) * (1 - epislon);
+	off_prob_temp *= 1 - pow(1 - lambda, z_by_y[nth * D + d] - 1) * (1 - epislon);
 	} else {
 	  on_prob_temp *= 1 - pow(1 - lambda, z_by_y[nth * D + d] + 1) * (1 - epislon);
 	  off_prob_temp *= 1 - pow(1 - lambda, z_by_y[nth * D + d]) * (1 - epislon);
@@ -135,38 +143,66 @@ kernel void sample_z(global int *cur_y,
       }
     } 
   }
-
+  
   //printf("index: %d post_on: %f post_off: %f\n", nth * K + kth, on_prob_temp, off_prob_temp);
   float post[2] = {on_prob_temp, off_prob_temp};
   uint labels[2] = {1, 0};
   pnormalize(post, 0, 2);
-  //printf("before %f %f %d \n", post[0], post[1], cur_z[nth * N + kth]);
+  //printf("before index: %d %f %f %d \n", nth * K + kth, post[0], post[1], cur_z[nth * K + kth]);
   cur_z[nth * K + kth] = sample(2, labels, post, 0, rand[nth * K + kth]);
-  //printf("index: %d after %f %f %d \n", nth * K + kth, post[0], post[1], cur_z[nth * K + kth]);
+  //printf("after index: %d %f %f %d \n", nth * K + kth, post[0], post[1], cur_z[nth * K + kth]);
 }
 
-kernel void logprob_z(global int *cur_z,
-		      global float *logprob_z,
-		      global int *novel_f,
-		      uint N, uint K,
-		      float alpha) {
+     
+kernel void logprob_z_data(global int *cur_z,
+			   global int *cur_y,
+			   global int *obs,
+			   global float *logprob,
+			   uint N, uint D, uint K,
+			   float alpha, float lambda, float epislon) {
 
   uint nth = get_global_id(0); // n is the index of data
-  uint kth = get_global_id(1); // k is the index of features
+  uint m;
+  uint novel_count = 0;
+  float logprob_temp = 0;
 
-  uint m = 0;
-  for (int i = 0; i < nth; i++) {
-    m += (cur_z[i * K + kth] == 1);
-  }
-  if (m > 0) {
-    novel_f[nth * K + kth] = 0;
-    if (cur_z[nth * K + kth] == 1) {
-      logprob_z[nth * K + kth] = log(m / (nth + 1.0f));
-    } else {
-      logprob_z[nth * K + kth] = log(1 - m / (nth + 1.0f));
+  /* calculate the log probability of the nth row of Z 
+     i.e., the prior probability of having the features
+     of the nth object.
+   */
+  for (int k = 0; k < K; k++) {
+    m = 0;
+    for (int n = 0; n < nth; n++) {
+      m += cur_z[n * K + k];
     }
-  } else {
-    logprob_z[nth * K + kth] = 0;
-    novel_f[nth * K + kth] = (cur_z[nth * K + kth] == 1);
+    if (m > 0) { // if other objects have had this feature
+      if (cur_z[nth * K + k] == 1) {
+	logprob_temp += log(m / (nth + 1.0f));
+      } else {
+	logprob_temp += log(1 - m / (nth + 1.0f));
+      }
+    } else { // if this is a novel feature
+      if (cur_z[nth * K + k] == 1) novel_count += 1;
+    }
   }
+  if (novel_count > 0) {
+    logprob_temp += pois_logpmf(novel_count, alpha / (nth+1.0f));
+  }
+
+  /* calculate the log-likelihood of the nth row of data
+     given the corresponding row in Z and Y
+  */
+  uint weight;
+  for (int d = 0; d < D; d++) {
+    weight = 0;
+    for (int k = 0; k < K; k++) {
+      weight += cur_y[k * D + d] * cur_z[nth * K + k];
+    }
+    if (obs[nth * D + d] == 1) {
+      logprob_temp += log(1 - pow(1 - lambda, weight) * (1 - epislon));
+    } else {
+      logprob_temp += weight * log(1 - lambda) + log(1 - epislon);
+    }
+  }
+  logprob[nth] = logprob_temp;
 }

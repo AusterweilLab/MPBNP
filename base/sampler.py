@@ -136,6 +136,12 @@ class BaseSampler(object):
             self.no_improv += 1
             return False
 
+    def no_improvement(self, threshold=500):
+        if self.no_improv > threshold or np.mean(self.best_diff[-threshold:]) < 1:
+            print('Too little improvement in loglikelihood - Abort searching', file=sys.stderr)
+            return True
+        return False
+        
     def _logprob(self, sample):
         """Compute the logliklihood of data given a sample. This method
         does nothing in the base class.
