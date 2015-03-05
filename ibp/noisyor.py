@@ -181,9 +181,9 @@ class Gibbs(BaseSampler):
             cur_y, cur_z = k_new
         
         # delete empty feature images
-        non_empty_feat_img = np.where(cur_y.sum(axis = 1) > 0)
-        cur_y = cur_y[non_empty_feat_img[0],:]
-        cur_z = cur_z[:,non_empty_feat_img[0]]
+        #non_empty_feat_img = np.where(cur_y.sum(axis = 1) > 0)
+        #cur_y = cur_y[non_empty_feat_img[0],:]
+        #cur_z = cur_z[:,non_empty_feat_img[0]]
 
         # delete null features
         active_feat_col = np.where(cur_z.sum(axis = 0) > 0)
@@ -364,9 +364,9 @@ class Gibbs(BaseSampler):
             cur_y, cur_z = k_new
 
         # delete empty feature images
-        non_empty_feat_img = np.where(cur_y.sum(axis = 1) > 0)
-        cur_y = cur_y[non_empty_feat_img[0],:].astype(np.int32)
-        cur_z = cur_z[:,non_empty_feat_img[0]].astype(np.int32)
+        #non_empty_feat_img = np.where(cur_y.sum(axis = 1) > 0)
+        #cur_y = cur_y[non_empty_feat_img[0],:].astype(np.int32)
+        #cur_z = cur_z[:,non_empty_feat_img[0]].astype(np.int32)
             
         # delete null features
         inactive_feat_col = np.where(cur_z.sum(axis = 0) == 0)

@@ -126,13 +126,13 @@ kernel void sample_z(global int *cur_y,
   // extremely hackish way to calculate the probelihood
   for (d = 0; d < D; d++) {
     // if the kth feature can turn on a pixel at d
-    if (cur_y[kth * K + d] == 1) {
+    if (cur_y[kth * D + d] == 1) {
       // if the observed pixel at dth is on
       if (obs[nth * D + d] == 1) {
 	// if the nth object previously has the kth feature
 	if (cur_z[nth * K + kth] == 1) {
-	on_prob_temp *= 1 - pow(1 - lambda, z_by_y[nth * D + d]) * (1 - epislon);
-	off_prob_temp *= 1 - pow(1 - lambda, z_by_y[nth * D + d] - 1) * (1 - epislon);
+	  on_prob_temp *= 1 - pow(1 - lambda, z_by_y[nth * D + d]) * (1 - epislon);
+	  off_prob_temp *= 1 - pow(1 - lambda, z_by_y[nth * D + d] - 1) * (1 - epislon);
 	} else {
 	  on_prob_temp *= 1 - pow(1 - lambda, z_by_y[nth * D + d] + 1) * (1 - epislon);
 	  off_prob_temp *= 1 - pow(1 - lambda, z_by_y[nth * D + d]) * (1 - epislon);
