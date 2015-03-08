@@ -106,8 +106,9 @@ class Gibbs(BaseSampler):
             if self.record_best:
                 # print out the Y matrix
                 final_y, final_z = self.best_sample[0]
-                print(final_y, file = output_file)
-                print(final_z, file = output_file)
+                hyper_pram = [self.alpha, self.lam, self.theta, self.epislon]
+                print(final_z.shape[1], *(hyper_pram + list(final_y.flatten())), file = output_file, sep=',')
+                print(final_z.shape[1], *(hyper_pram + list(final_z.flatten())), file = output_file, sep=',')
             else:
                 cPickle.dump(self.samples, open(output_file, 'w'))
 
@@ -181,9 +182,9 @@ class Gibbs(BaseSampler):
             cur_y, cur_z = k_new
         
         # delete empty feature images
-        #non_empty_feat_img = np.where(cur_y.sum(axis = 1) > 0)
-        #cur_y = cur_y[non_empty_feat_img[0],:]
-        #cur_z = cur_z[:,non_empty_feat_img[0]]
+        non_empty_feat_img = np.where(cur_y.sum(axis = 1) > 0)
+        cur_y = cur_y[non_empty_feat_img[0],:]
+        cur_z = cur_z[:,non_empty_feat_img[0]]
 
         # delete null features
         active_feat_col = np.where(cur_z.sum(axis = 0) > 0)
@@ -284,12 +285,10 @@ class Gibbs(BaseSampler):
         self.auto_save_sample(sample = (cur_y, cur_z))
         for i in xrange(self.niter):
             a_time = time()
-            #print('before:', cur_z, cur_y)
             temp_cur_y = self._cl_infer_y(cur_y, cur_z, d_obs)
             temp_cur_z = self._cl_infer_z(temp_cur_y, cur_z, d_obs)
             self.gpu_time += time() - a_time
             temp_cur_y, temp_cur_z = self._cl_infer_k_new(temp_cur_y, temp_cur_z)
-            #print('after:', temp_cur_z)
 
             if self.record_best:
                 if self.auto_save_sample(sample = (temp_cur_y, temp_cur_z)):
@@ -300,7 +299,6 @@ class Gibbs(BaseSampler):
                 cur_y, cur_z = temp_cur_y, temp_cur_z
                 self.samples['z'].append(cur_z)
                 self.samples['y'].append(cur_y)
-            #raw_input()
             
             self.total_time += time() - a_time
 
@@ -308,8 +306,9 @@ class Gibbs(BaseSampler):
             if self.record_best:
                 # print out the Y matrix
                 final_y, final_z = self.best_sample[0]
-                print(final_y, file = output_file)
-                print(final_z, file = output_file)
+                hyper_pram = [self.alpha, self.lam, self.theta, self.epislon]
+                print(final_z.shape[1], *(hyper_pram + list(final_y.flatten())), file = output_file, sep=',')
+                print(final_z.shape[1], *(hyper_pram + list(final_z.flatten())), file = output_file, sep=',')
             else:
                 cPickle.dump(self.samples, open(output_file, 'w'))
 
@@ -364,9 +363,9 @@ class Gibbs(BaseSampler):
             cur_y, cur_z = k_new
 
         # delete empty feature images
-        #non_empty_feat_img = np.where(cur_y.sum(axis = 1) > 0)
-        #cur_y = cur_y[non_empty_feat_img[0],:].astype(np.int32)
-        #cur_z = cur_z[:,non_empty_feat_img[0]].astype(np.int32)
+        non_empty_feat_img = np.where(cur_y.sum(axis = 1) > 0)
+        cur_y = cur_y[non_empty_feat_img[0],:].astype(np.int32)
+        cur_z = cur_z[:,non_empty_feat_img[0]].astype(np.int32)
             
         # delete null features
         inactive_feat_col = np.where(cur_z.sum(axis = 0) == 0)
