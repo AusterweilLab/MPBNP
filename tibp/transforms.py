@@ -4,7 +4,7 @@
 from __future__ import print_function, division
 import numpy as np
 
-def v_translation(f_img, f_img_width, distance):
+def v_translate(f_img, f_img_width, distance):
     """Translate a feature image vertically by distance (+ 
     indicates down, - indicates up).
     """
@@ -21,7 +21,7 @@ def v_translation(f_img, f_img_width, distance):
                        f_img_mat[:shift])).reshape(f_img.shape)
     return t
 
-def h_translation(f_img, f_img_width, distance):
+def h_translate(f_img, f_img_width, distance):
     """Translate a feature image horizontally by distance (+ 
     indicates right, - indicates left).
     """
