@@ -18,6 +18,7 @@ class Gibbs(BaseSampler):
 
     V_TRANS = 0
     H_TRANS = 1
+    NUM_TRANS = 2
     
     def __init__(self, cl_mode = True, cl_device = None, record_best = True,
                  alpha = None, lam = 0.98, theta = 0.2, epislon = 0.02, init_k = 10):
@@ -75,14 +76,14 @@ class Gibbs(BaseSampler):
             assert(init_z.shape == (len(self.obs), self.k))
 
         if init_r is None:
-            init_r = np.zeros((self.N, self.k, 2))
+            init_r = np.zeros((self.N, self.k, self.NUM_TRANS))
         else:
             assert(init_r is None)
 
         if self.cl_mode:
             return self._cl_infer_yz(init_y, init_z, output_file)
         else:
-            return self._infer_yz(init_y, init_z, output_file)
+            return self._infer_yzr(init_y, init_z, init_r, output_file)
 
     def _infer_yzr(self, init_y, init_z, init_r, output_file):
         """Wrapper function to start the inference on y, z and r.
@@ -96,15 +97,15 @@ class Gibbs(BaseSampler):
         cur_r = init_r
 
         a_time = time()
-        self.auto_save_sample(sample = (cur_y, cur_z, cur_r))
+        #self.auto_save_sample(sample = (cur_y, cur_z, cur_r))
         for i in xrange(self.niter):
             temp_cur_y = self._infer_y(cur_y, cur_z, cur_r)
             temp_cur_y, temp_cur_z, temp_cur_r = self._infer_z(temp_cur_y, cur_z, cur_r)
-            temp_cur_r = self._infer_r(temp_cur_y, temp_cur_z, temp_cur_r)
+            #temp_cur_r = self._infer_r(temp_cur_y, temp_cur_z, temp_cur_r)
             #self._sample_lam(cur_y, cur_z)
 
             if self.record_best:
-                if self.auto_save_sample(sample = (temp_cur_y, temp_cur_z)):
+                if self.auto_save_sample(sample = (temp_cur_y, temp_cur_z, temp_cur_r)):
                     cur_y, cur_z, cur_r = temp_cur_y, temp_cur_z, temp_cur_r
                 if self.no_improvement():
                     break                    
@@ -118,7 +119,7 @@ class Gibbs(BaseSampler):
         if output_file is not None:
             if self.record_best:
                 # print out the Y matrix
-                final_y, final_z = self.best_sample[0]
+                final_y, final_z, final_r = self.best_sample[0]
                 hyper_pram = [self.alpha, self.lam, self.theta, self.epislon]
                 print(final_z.shape[1], *(hyper_pram + list(final_y.flatten())), file = output_file, sep=',')
                 print(final_z.shape[1], *(hyper_pram + list(final_z.flatten())), file = output_file, sep=',')
@@ -162,7 +163,7 @@ class Gibbs(BaseSampler):
 
         return cur_y
 
-    def _infer_z(self, cur_y, cur_z):
+    def _infer_z(self, cur_y, cur_z, cur_r):
         """Infer feature ownership
         """
         N = float(len(self.obs))
@@ -178,9 +179,9 @@ class Gibbs(BaseSampler):
             for col in xrange(cur_z.shape[1]):
                 old_value = cur_z[row, col]
                 cur_z[row, col] = 1
-                on_prob[row, col] = on_prob[row, col] * np.exp(self._loglik_nth(cur_y, cur_z, n = row))
+                on_prob[row, col] = on_prob[row, col] * np.exp(self._loglik_nth(cur_y, cur_z, cur_r, n = row))
                 cur_z[row, col] = 0
-                off_prob[row, col] = off_prob[row, col] * np.exp(self._loglik_nth(cur_y, cur_z, n = row))
+                off_prob[row, col] = off_prob[row, col] * np.exp(self._loglik_nth(cur_y, cur_z, cur_r, n = row))
                 cur_z[row, col] = old_value
 
         # normalize the probability
@@ -190,19 +191,21 @@ class Gibbs(BaseSampler):
         cur_z = np.random.binomial(1, on_prob)
 
         # sample new features use importance sampling
-        k_new = self._sample_k_new(cur_y, cur_z)
+        k_new = self._sample_k_new(cur_y, cur_z, cur_r)
         if k_new:
-            cur_y, cur_z = k_new
+            cur_y, cur_z, cur_r = k_new
         
         # delete empty feature images
         non_empty_feat_img = np.where(cur_y.sum(axis = 1) > 0)
         cur_y = cur_y[non_empty_feat_img[0],:]
         cur_z = cur_z[:,non_empty_feat_img[0]]
-
+        cur_r = np.array([_[non_empty_feat_img[0],:] for _ in cur_r])
+        
         # delete null features
         active_feat_col = np.where(cur_z.sum(axis = 0) > 0)
         cur_z = cur_z[:,active_feat_col[0]]
         cur_y = cur_y[active_feat_col[0],:]
+        cur_r = np.array([_[active_feat_col[0],:] for _ in cur_r])
 
         # the above two steps need to be done before sampling new features
         # because new features are initialized randomly
@@ -210,9 +213,9 @@ class Gibbs(BaseSampler):
         # update self.k
         self.k = cur_z.shape[1]
         
-        return cur_y, cur_z
+        return cur_y, cur_z, cur_r
 
-    def _sample_k_new(self, cur_y, cur_z):
+    def _sample_k_new(self, cur_y, cur_z, cur_r):
         """Sample new features for all rows using Metropolis hastings.
         (This is a heuristic strategy aiming for easy parallelization in an 
         equivalent GPU implementation. We here have effectively treated the
@@ -222,7 +225,7 @@ class Gibbs(BaseSampler):
         sampled new ks.)
         """
         N = float(len(self.obs))
-        old_loglik = self._loglik(cur_y, cur_z)
+        #old_loglik = self._loglik(cur_y, cur_z, cur_r)
 
         k_new_count = np.random.poisson(self.alpha / N)
         if k_new_count == 0: return False
@@ -232,8 +235,8 @@ class Gibbs(BaseSampler):
         #cur_z_new[:, [xrange(-k_new_count,0)]] = 1
         # propose feature images by sampling from the prior distribution
         cur_y_new = np.vstack((cur_y, np.random.binomial(1, self.theta, (k_new_count, self.d))))
-        
-        return cur_y_new.astype(np.int32), cur_z_new.astype(np.int32)
+        cur_r_new = np.array([np.vstack((_, np.zeros((k_new_count, self.NUM_TRANS)))) for _ in cur_r])
+        return cur_y_new.astype(np.int32), cur_z_new.astype(np.int32), cur_r_new
 
     def _sample_lam(self, cur_y, cur_z):
         """Resample the value of lambda.
@@ -271,13 +274,17 @@ class Gibbs(BaseSampler):
         """
         assert(cur_z.shape[1] == cur_y.shape[0] == cur_r.shape[1])
 
-        not_on_p = np.empty((n[0].shape[0], cur_y.shape[1]))
+        if type(n) is int:
+            n = [n]
+        else:
+            n = n[0]
+        not_on_p = np.empty((len(n), cur_y.shape[1]))
         
         # transform the feature images to obtain the effective y
         # this needs to be done on a per object basis
         # THE FOLLOWING CODE HAS NOT BEEN TESTED
 
-        for i in xrange(n[0].shape[0]):
+        for i in xrange(len(n)):
             nth = n[i]
             nth_y = copy.deepcopy(cur_y) # the transformed cur_y with respect to nth
             kth_feat = 0
@@ -430,7 +437,7 @@ class Gibbs(BaseSampler):
     def _logprob(self, sample):
         """Calculate the joint log probability of data and model given a sample.
         """
-        cur_y, cur_z = sample
+        cur_y, cur_z, cur_r = sample
         log_prior = 0
         log_lik = 0
         if cur_z.shape[1] == 0: return -99999999.9
@@ -472,7 +479,7 @@ class Gibbs(BaseSampler):
             num_off = (cur_y == 0).sum()
             log_prior += num_on * np.log(self.theta) + num_off * np.log(1 - self.theta)
             # calculate the logliklihood
-            log_lik = self._loglik(cur_y = cur_y, cur_z = cur_z)
+            log_lik = self._loglik(cur_y = cur_y, cur_z = cur_z, cur_r = cur_r)
         return log_prior + log_lik
             
     
