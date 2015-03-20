@@ -16,6 +16,9 @@ np.set_printoptions(suppress=True)
 
 class Gibbs(BaseSampler):
 
+    V_TRANS = 0
+    H_TRANS = 1
+    
     def __init__(self, cl_mode = True, cl_device = None, record_best = True,
                  alpha = None, lam = 0.98, theta = 0.2, epislon = 0.02, init_k = 10):
         """Initialize the class.
@@ -287,13 +290,27 @@ class Gibbs(BaseSampler):
         loglik = np.log(np.abs(self.obs[n] - not_on_p)).sum()
         return loglik
 
-    def _loglik(self, cur_y, cur_z):
-        """Calculate the loglikelihood of data given Y and Z.
+    def _loglik(self, cur_y, cur_z, cur_r):
+        """Calculate the loglikelihood of data given Y, Z and R.
         """
-        assert(cur_z.shape[1] == cur_y.shape[0])
+        assert(cur_z.shape[1] == cur_y.shape[0] == cur_r.shape[1])
 
-        n_by_d = np.dot(cur_z, cur_y)
-        not_on_p = np.power(1. - self.lam, n_by_d) * (1. - self.epislon)
+        not_on_p = np.empty((self.N, self.d))
+
+        # transform the feature images to obtain the effective y
+        # this needs to be done on a per object basis
+        # THE FOLLOWING CODE HAS NOT BEEN TESTED
+        
+        for nth in xrange(self.N):
+            nth_y = copy.deepcopy(cur_y) # the transformed cur_y with respect to nth
+            kth_feat = 0
+            for r_feat in cur_r[nth]: # r_feat refers to the transforms applied one feature
+                nth_y[kth_feat] = v_translate(nth_y[kth_feat], self.d, r_feat[self.V_TRANS])
+                nth_y[kth_feat] = h_translate(nth_y[kth_feat], self.d, r_feat[self.H_TRANS])
+                kth_feat += 1
+                
+            not_on_p[nth] = np.power(1. - self.lam, np.dot(cur_z[nth], nth_y)) * (1. - self.epislon)
+        
         loglik_mat = np.log(np.abs(self.obs - not_on_p))
         return loglik_mat.sum()
 
