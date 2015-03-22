@@ -41,20 +41,30 @@ class Gibbs(BaseSampler):
         """Read the data from a csv file.
         """
         BaseSampler.read_csv(self, filepath, header)
-        # convert the data to floats
+        # convert the data to the appropriate formats
         self.new_obs = []
+        self.img_w, self.img_h = None, None
         for row in self.obs:
+            if self.img_w is None:
+                self.img_w = int(row[0])
+                if self.img_w == 0 or (len(row)-1) % self.img_w != 0:
+                    raise Exception('The sampler does not understand the format of the data. Did you forget to specify image width in the data file?')
             self.new_obs.append([int(_) for _ in row])
-        self.obs = np.array(self.new_obs)
+            
+        self.obs = np.array(self.new_obs)[:,1:]
         if self.cl_mode:
             self.d_obs = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf=self.obs.astype(np.int32))
 
+        # self.d is the length of the flattened vectors
         self.d = self.obs.shape[1]
+        self.img_h = self.d / self.img_w
         self.alpha = self.N
         return
 
     def direct_read_obs(self, obs):
-        BaseSampler.read_csv(self, obs)
+        """Read the data from a numpy array.
+        """
+        BaseSampler.direct_read_obs(self, obs)
         self.d = self.obs.shape[1]
         
     def do_inference(self, init_y = None, init_z = None, init_r = None, output_file = None):
@@ -101,7 +111,7 @@ class Gibbs(BaseSampler):
         for i in xrange(self.niter):
             temp_cur_y = self._infer_y(cur_y, cur_z, cur_r)
             temp_cur_y, temp_cur_z, temp_cur_r = self._infer_z(temp_cur_y, cur_z, cur_r)
-            #temp_cur_r = self._infer_r(temp_cur_y, temp_cur_z, temp_cur_r)
+            temp_cur_r = self._infer_r(temp_cur_y, temp_cur_z, temp_cur_r)
             #self._sample_lam(cur_y, cur_z)
 
             if self.record_best:
@@ -215,6 +225,34 @@ class Gibbs(BaseSampler):
         
         return cur_y, cur_z, cur_r
 
+    def _infer_r(self, cur_y, cur_z, cur_r):
+        """Infer transformations.
+        """
+        # iterate over each transformation and resample it 
+        for nth_img in xrange(cur_r.shape[0]):
+            for kth_feature in xrange(cur_r.shape[1]):
+                old_loglik = self._loglik(cur_y, cur_z, cur_r)
+
+                # resample vertical translation
+                old_v_trans = cur_r[nth_img, kth_feature, self.V_TRANS]
+                # set a new vertical transformation
+                cur_r[nth_img, kth_feature, self.V_TRANS] = np.random.randint(-self.img_h+1, self.img_h)
+                new_loglik = self._loglik(cur_y, cur_z, cur_r)
+                move_prob = 1 / (1 + np.exp(old_loglik - new_loglik))
+                if random.random() > move_prob: # revert changes if move_prob too small
+                    cur_r[nth_img, kth_feature, self.V_TRANS] = old_v_trans
+
+                # resample horizontal translation
+                old_h_trans = cur_r[nth_img, kth_feature, self.H_TRANS]
+                # set a new vertical transformation
+                cur_r[nth_img, kth_feature, self.H_TRANS] = np.random.randint(-self.img_w+1, self.img_w)
+                new_loglik = self._loglik(cur_y, cur_z, cur_r)
+                move_prob = 1 / (1 + np.exp(old_loglik - new_loglik))
+                if random.random() > move_prob: # revert changes if move_prob too small
+                    cur_r[nth_img, kth_feature, self.H_TRANS] = old_h_trans
+                    
+        return cur_r
+    
     def _sample_k_new(self, cur_y, cur_z, cur_r):
         """Sample new features for all rows using Metropolis hastings.
         (This is a heuristic strategy aiming for easy parallelization in an 
@@ -247,7 +285,7 @@ class Gibbs(BaseSampler):
         # modify the feature ownership matrix
         self.lam = np.random.beta(1,1)
         new_loglik = self._loglik(cur_y, cur_z)
-        move_prob = 1 / (1 + np.exp(old_loglik - new_loglik));
+        move_prob = 1 / (1 + np.exp(old_loglik - new_loglik))
         if random.random() < move_prob:
             pass
         else:
@@ -289,8 +327,8 @@ class Gibbs(BaseSampler):
             nth_y = copy.deepcopy(cur_y) # the transformed cur_y with respect to nth
             kth_feat = 0
             for r_feat in cur_r[nth]: # r_feat refers to the transforms applied one feature
-                nth_y[kth_feat] = v_translate(nth_y[kth_feat], self.d, r_feat[self.V_TRANS])
-                nth_y[kth_feat] = h_translate(nth_y[kth_feat], self.d, r_feat[self.H_TRANS])
+                nth_y[kth_feat] = v_translate(nth_y[kth_feat], self.img_w, r_feat[self.V_TRANS])
+                nth_y[kth_feat] = h_translate(nth_y[kth_feat], self.img_w, r_feat[self.H_TRANS])
                 kth_feat += 1
                 
             not_on_p[i] = np.power(1. - self.lam, np.dot(cur_z[nth], nth_y)) * (1. - self.epislon)
@@ -312,8 +350,8 @@ class Gibbs(BaseSampler):
             nth_y = copy.deepcopy(cur_y) # the transformed cur_y with respect to nth
             kth_feat = 0
             for r_feat in cur_r[nth]: # r_feat refers to the transforms applied one feature
-                nth_y[kth_feat] = v_translate(nth_y[kth_feat], self.d, r_feat[self.V_TRANS])
-                nth_y[kth_feat] = h_translate(nth_y[kth_feat], self.d, r_feat[self.H_TRANS])
+                nth_y[kth_feat] = v_translate(nth_y[kth_feat], self.img_w, r_feat[self.V_TRANS])
+                nth_y[kth_feat] = h_translate(nth_y[kth_feat], self.img_w, r_feat[self.H_TRANS])
                 kth_feat += 1
                 
             not_on_p[nth] = np.power(1. - self.lam, np.dot(cur_z[nth], nth_y)) * (1. - self.epislon)

@@ -28,7 +28,6 @@ def h_translate(f_img, f_img_width, distance):
     if distance == 0: return f_img
     f_img_height = f_img.shape[0] / f_img_width
     f_img_mat = f_img.reshape((f_img_height, f_img_width))
-    print(f_img_mat)
     if distance > 0:
         shift = distance % f_img_width
         t = np.hstack((f_img_mat[:,f_img_width-shift:],

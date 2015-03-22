@@ -96,7 +96,7 @@ class BaseSampler(object):
         #dialect = csv.Sniffer().sniff(csvfile.read(1024))
         csvfile.seek(0)
         reader = csv.reader(csvfile)#, dialect)
-        if header: 
+        if header:
             reader.next()
         for row in reader:
             self.obs.append([_ for _ in row])
