@@ -231,13 +231,13 @@ class Gibbs(BaseSampler):
         # iterate over each transformation and resample it 
         for nth_img in xrange(cur_r.shape[0]):
             for kth_feature in xrange(cur_r.shape[1]):
-                old_loglik = self._loglik(cur_y, cur_z, cur_r)
+                old_loglik = self._loglik_nth(cur_y, cur_z, cur_r, n=nth_img)
 
                 # resample vertical translation
                 old_v_trans = cur_r[nth_img, kth_feature, self.V_TRANS]
                 # set a new vertical transformation
-                cur_r[nth_img, kth_feature, self.V_TRANS] = np.random.randint(-self.img_h+1, self.img_h)
-                new_loglik = self._loglik(cur_y, cur_z, cur_r)
+                cur_r[nth_img, kth_feature, self.V_TRANS] = np.random.randint(0, self.img_h)
+                new_loglik = self._loglik_nth(cur_y, cur_z, cur_r, n = nth_img)
                 move_prob = 1 / (1 + np.exp(old_loglik - new_loglik))
                 if random.random() > move_prob: # revert changes if move_prob too small
                     cur_r[nth_img, kth_feature, self.V_TRANS] = old_v_trans
@@ -245,8 +245,8 @@ class Gibbs(BaseSampler):
                 # resample horizontal translation
                 old_h_trans = cur_r[nth_img, kth_feature, self.H_TRANS]
                 # set a new vertical transformation
-                cur_r[nth_img, kth_feature, self.H_TRANS] = np.random.randint(-self.img_w+1, self.img_w)
-                new_loglik = self._loglik(cur_y, cur_z, cur_r)
+                cur_r[nth_img, kth_feature, self.H_TRANS] = np.random.randint(0, self.img_w)
+                new_loglik = self._loglik_nth(cur_y, cur_z, cur_r, n = nth_img)
                 move_prob = 1 / (1 + np.exp(old_loglik - new_loglik))
                 if random.random() > move_prob: # revert changes if move_prob too small
                     cur_r[nth_img, kth_feature, self.H_TRANS] = old_h_trans
@@ -320,7 +320,6 @@ class Gibbs(BaseSampler):
         
         # transform the feature images to obtain the effective y
         # this needs to be done on a per object basis
-        # THE FOLLOWING CODE HAS NOT BEEN TESTED
 
         for i in xrange(len(n)):
             nth = n[i]
@@ -344,7 +343,6 @@ class Gibbs(BaseSampler):
 
         # transform the feature images to obtain the effective y
         # this needs to be done on a per object basis
-        # THE FOLLOWING CODE HAS NOT BEEN TESTED
         
         for nth in xrange(self.N):
             nth_y = copy.deepcopy(cur_y) # the transformed cur_y with respect to nth
