@@ -23,7 +23,6 @@ float mvt_logpdf(global float *data_vec, int data_i, int dim, float df,
   return part1 + part2 + part3;
 }
 
-
 float max_arr(global float *arr, int start, int length) {
   float result = arr[start];
   for (int i = start + 1; i < start + length; i++) {
@@ -53,7 +52,10 @@ float sum(global float *arr, int start, int length) {
 void lognormalize(global float *logp, int start, int length) {
   float m = max_arr(logp, start, length);
   for (int i = start; i < start + length; i++) {
-    logp[i] = native_powr(exp(1.0f), logp[i] - m);
+    logp[i] = powr(exp(1.0f), logp[i] - m);
+    // this line is a hack to prevent a weird nVIDIA-only global memory bug
+    // !logp is global
+    // a simple exp(logp[i] - m) fails to compile on nvidia cards
   }
   float p_sum = sum(logp, start, length);
   for (int i = start; i < start + length; i++) {
@@ -61,10 +63,11 @@ void lognormalize(global float *logp, int start, int length) {
   }
 }
 
-int sample(uint a_size, global uint *a, global float *p, int start, float rand) {
-  float total = 0;
+
+uint sample(uint a_size, global uint *a, global float *p, int start, float rand) {
+  float total = 0.0f;
   for (int i = start; i < start + a_size; i++) {
-    total += p[i];
+    total = total + p[i];
     if (total > rand) return a[i-start];
   }
   return a[a_size - 1];
@@ -74,7 +77,6 @@ __kernel void normal_1d_logpost(global uint *labels, global float *data, global 
 				global float *mu, global float *ss, global uint *n,
 				int cluster_num, global float *hyper_param, global float *rand,
 				global float *logpost) {
-
   uint i = get_global_id(0);
   uint c = get_global_id(1);
   uint data_size = get_global_size(0); // total number of data
@@ -130,7 +132,7 @@ __kernel void normal_1d_logpost_loopy(global uint *labels, global float *data, g
     new_size = n[c];
     original_cluster = old_label == new_label;
     empty_n += (original_cluster && new_size == 1);
-    /* compute other variables */
+    // compute other variables 
     k_n = gaussian_k0 + new_size;
     mu_n = (gaussian_k0 * gaussian_mu0 + new_size * mu[c]) / k_n;
     alpha_n = gamma_alpha0 + new_size / 2.0f;
@@ -149,7 +151,7 @@ __kernel void normal_1d_logpost_loopy(global uint *labels, global float *data, g
   labels[i] = sample(cluster_num, uniq_label, logpost, i * cluster_num, rand[i]);
 }
 
-/* kernel to compute the joint log probability of data and a given sample (i.e., labels)*/
+// kernel to compute the joint log probability of data and a given sample (i.e., labels)
 __kernel void joint_logprob(global uint *labels, global float *data, 
 			    global float *hyper_param, global float *logprob) {
 
@@ -187,14 +189,14 @@ __kernel void joint_logprob(global uint *labels, global float *data,
     }
   }
 
-  /* compute other variables */
+  // compute other variables 
   k_n = gaussian_k0 + n;
   mu_n = (gaussian_k0 * gaussian_mu0 + n * mu) / k_n;
   alpha_n = gamma_alpha0 + n / 2.0f;
   beta_n = gamma_beta0 + 0.5f * ss + gaussian_k0 * n * pow(mu - gaussian_mu0, 2.0f) / (2.0f * k_n);
   Lambda = alpha_n * k_n / (beta_n * (k_n + 1.0f));
   sigma = pow(1.0f/Lambda, 0.5f);
-  /* compute the joint log probability */
+  // compute the joint log probability 
   logprob[data_pos] = t_logpdf(data[data_pos], 2.0f * alpha_n, mu_n, sigma);
   logprob[data_pos] += (n > 0) ? log( (float)n / ((float)data_pos + alpha)) : log(alpha / ((float)data_pos + alpha));
 }
@@ -240,7 +242,8 @@ __kernel void normal_kd_logpost(global uint *labels, global float *data, global 
     labels[i] = sample(cluster_num, uniq_label, logpost, i * cluster_num, rand[i]);
   }
   */
-}  
+}
+
 
 __kernel void resample_labels(global uint *labels, global uint *uniq_label, uint cluster_num, global float *rand, global float *logpost) {
 
@@ -282,7 +285,6 @@ __kernel void normal_kd_logpost_loopy(global uint *labels, global float *data, g
   labels[i] = sample(cluster_num, uniq_label, logpost, i * cluster_num, rand[i]);
   //printf("Data %d After: %d\n", i, labels[i]);
 }
-
 
 /*
 __kernel void get_mu(global uint *labels, global float *data, gloal uint *uniq_label, 

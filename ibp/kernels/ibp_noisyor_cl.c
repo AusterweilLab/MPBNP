@@ -39,7 +39,8 @@ float sum(float *arr, int start, int length) {
 void lognormalize(float *logp, int start, int length) {
   float m = max_arr(logp, start, length);
   for (int i = start; i < start + length; i++) {
-    logp[i] = native_powr(exp(1.0f), logp[i] - m);
+    printf("%f\n", m);
+    logp[i] = pow(exp(1.0f), logp[i] - m);
   }
   float p_sum = sum(logp, start, length);
   for (int i = start; i < start + length; i++) {
