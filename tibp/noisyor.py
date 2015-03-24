@@ -312,10 +312,8 @@ class Gibbs(BaseSampler):
         """
         assert(cur_z.shape[1] == cur_y.shape[0] == cur_r.shape[1])
 
-        if type(n) is int:
-            n = [n]
-        else:
-            n = n[0]
+        if type(n) is int: n = [n]
+        else: n = n[0]
         not_on_p = np.empty((len(n), cur_y.shape[1]))
         
         # transform the feature images to obtain the effective y
@@ -357,40 +355,43 @@ class Gibbs(BaseSampler):
         loglik_mat = np.log(np.abs(self.obs - not_on_p))
         return loglik_mat.sum()
 
-    def _cl_infer_yz(self, init_y, init_z, output_file = None):
+    def _cl_infer_yzr(self, init_y, init_z, init_r, output_file = None):
         """Wrapper function to start the inference on y and z.
         This function is not supposed to directly invoked by an end user.
         @param init_y: Passed in from do_inference()
         @param init_z: Passed in from do_inference()
+        @param init_r: Passed in from do_inference()
         """
         cur_y = init_y.astype(np.int32)
         cur_z = init_z.astype(np.int32)
-        d_obs = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf=self.obs.astype(np.int32))
+        cur_r = init_r.astype(np.int32) # this is fine with only translations
 
-        self.auto_save_sample(sample = (cur_y, cur_z))
+        self.auto_save_sample(sample = (cur_y, cur_z, cur_r))
         for i in xrange(self.niter):
             a_time = time()
-            temp_cur_y = self._cl_infer_y(cur_y, cur_z, d_obs)
-            temp_cur_z = self._cl_infer_z(temp_cur_y, cur_z, d_obs)
+            temp_cur_y = self._cl_infer_y(cur_y, cur_z, cur_r)
+            temp_cur_z = self._cl_infer_z(temp_cur_y, cur_z, cur_r)
             self.gpu_time += time() - a_time
-            temp_cur_y, temp_cur_z = self._cl_infer_k_new(temp_cur_y, temp_cur_z)
+            temp_cur_r = self._infer_r(temp_cur_y, temp_cur_z, cur_r).astype(np.int32)
+            temp_cur_y, temp_cur_z, temp_cur_r = self._cl_infer_k_new(temp_cur_y, temp_cur_z, temp_cur_r)
 
             if self.record_best:
-                if self.auto_save_sample(sample = (temp_cur_y, temp_cur_z)):
-                    cur_y, cur_z = temp_cur_y, temp_cur_z
+                if self.auto_save_sample(sample = (temp_cur_y, temp_cur_z, temp_cur_r)):
+                    cur_y, cur_z, cur_r = temp_cur_y, temp_cur_z, temp_cur_r
                 if self.no_improvement():
                     break                    
             elif i >= self.burnin:
-                cur_y, cur_z = temp_cur_y, temp_cur_z
+                cur_y, cur_z, cur_r = temp_cur_y, temp_cur_z, temp_cur_r
                 self.samples['z'].append(cur_z)
                 self.samples['y'].append(cur_y)
+                self.samples['y'].append(cur_r)
             
             self.total_time += time() - a_time
 
         if output_file is not None:
             if self.record_best:
                 # print out the Y matrix
-                final_y, final_z = self.best_sample[0]
+                final_y, final_z, final_r = self.best_sample[0]
                 hyper_pram = [self.alpha, self.lam, self.theta, self.epislon]
                 print(final_z.shape[1], *(hyper_pram + list(final_y.flatten())), file = output_file, sep=',')
                 print(final_z.shape[1], *(hyper_pram + list(final_z.flatten())), file = output_file, sep=',')
@@ -399,11 +400,12 @@ class Gibbs(BaseSampler):
 
         return self.gpu_time, self.total_time, None
 
-    def _cl_infer_y(self, cur_y, cur_z, d_obs):
+    def _cl_infer_y(self, cur_y, cur_z, cur_r):
         """Infer feature images
         """
         d_cur_y = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = cur_y.astype(np.int32))
         d_cur_z = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = cur_z.astype(np.int32))
+        d_cur_r = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = cur_r.astype(np.int32))
         d_z_by_y = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
                              hostbuf = np.dot(cur_z, cur_y).astype(np.int32))
         d_rand = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
@@ -411,7 +413,7 @@ class Gibbs(BaseSampler):
 
         # calculate the prior probability that a pixel is on
         self.prg.sample_y(self.queue, cur_y.shape, None,
-                          d_cur_y, d_cur_z, d_z_by_y, d_obs,
+                          d_cur_y, d_cur_z, d_z_by_y, self.d_obs,
                           d_rand, #d_y_on_loglik.data, d_y_off_loglik.data,
                           np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_y.shape[0]),
                           np.float32(self.lam), np.float32(self.epislon), np.float32(self.theta))
@@ -419,7 +421,7 @@ class Gibbs(BaseSampler):
         cl.enqueue_copy(self.queue, cur_y, d_cur_y)
         return cur_y
 
-    def _cl_infer_z(self, cur_y, cur_z, d_obs):
+    def _cl_infer_z(self, cur_y, cur_z):
         """Infer feature ownership
         """
         d_cur_y = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = cur_y.astype(np.int32))
@@ -433,7 +435,7 @@ class Gibbs(BaseSampler):
 
         # calculate the prior probability that a pixel is on
         self.prg.sample_z(self.queue, cur_z.shape, None,
-                          d_cur_y, d_cur_z, d_z_by_y, d_z_col_sum, d_obs, d_rand, 
+                          d_cur_y, d_cur_z, d_z_by_y, d_z_col_sum, self.d_obs, d_rand, 
                           np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_z.shape[1]),
                           np.float32(self.lam), np.float32(self.epislon), np.float32(self.theta))
 

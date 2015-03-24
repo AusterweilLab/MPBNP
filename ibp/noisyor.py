@@ -280,13 +280,12 @@ class Gibbs(BaseSampler):
         """
         cur_y = init_y.astype(np.int32)
         cur_z = init_z.astype(np.int32)
-        d_obs = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf=self.obs.astype(np.int32))
 
         self.auto_save_sample(sample = (cur_y, cur_z))
         for i in xrange(self.niter):
             a_time = time()
-            temp_cur_y = self._cl_infer_y(cur_y, cur_z, d_obs)
-            temp_cur_z = self._cl_infer_z(temp_cur_y, cur_z, d_obs)
+            temp_cur_y = self._cl_infer_y(cur_y, cur_z)
+            temp_cur_z = self._cl_infer_z(temp_cur_y, cur_z)
             self.gpu_time += time() - a_time
             temp_cur_y, temp_cur_z = self._cl_infer_k_new(temp_cur_y, temp_cur_z)
 
@@ -314,7 +313,7 @@ class Gibbs(BaseSampler):
 
         return self.gpu_time, self.total_time, None
 
-    def _cl_infer_y(self, cur_y, cur_z, d_obs):
+    def _cl_infer_y(self, cur_y, cur_z):
         """Infer feature images
         """
         d_cur_y = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = cur_y.astype(np.int32))
@@ -326,7 +325,7 @@ class Gibbs(BaseSampler):
 
         # calculate the prior probability that a pixel is on
         self.prg.sample_y(self.queue, cur_y.shape, None,
-                          d_cur_y, d_cur_z, d_z_by_y, d_obs,
+                          d_cur_y, d_cur_z, d_z_by_y, self.d_obs,
                           d_rand, #d_y_on_loglik.data, d_y_off_loglik.data,
                           np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_y.shape[0]),
                           np.float32(self.lam), np.float32(self.epislon), np.float32(self.theta))
@@ -334,7 +333,7 @@ class Gibbs(BaseSampler):
         cl.enqueue_copy(self.queue, cur_y, d_cur_y)
         return cur_y
 
-    def _cl_infer_z(self, cur_y, cur_z, d_obs):
+    def _cl_infer_z(self, cur_y, cur_z):
         """Infer feature ownership
         """
         d_cur_y = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = cur_y.astype(np.int32))
@@ -348,7 +347,7 @@ class Gibbs(BaseSampler):
 
         # calculate the prior probability that a pixel is on
         self.prg.sample_z(self.queue, cur_z.shape, None,
-                          d_cur_y, d_cur_z, d_z_by_y, d_z_col_sum, d_obs, d_rand, 
+                          d_cur_y, d_cur_z, d_z_by_y, d_z_col_sum, self.d_obs, d_rand, 
                           np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_z.shape[1]),
                           np.float32(self.lam), np.float32(self.epislon), np.float32(self.theta))
 
