@@ -67,7 +67,7 @@ kernel void sample_y(global int *cur_y,
 		     global int *cur_z,
 		     global int *z_by_y,
 		     global int *obs,
-		     global float *rand, //global float *on_loglik, global float *off_loglik,
+		     global float *rand, 
 		     uint N, uint D, uint K,
 		     float lambda, float epislon, float theta) {
   

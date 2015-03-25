@@ -413,8 +413,7 @@ class Gibbs(BaseSampler):
 
         # calculate the prior probability that a pixel is on
         self.prg.sample_y(self.queue, cur_y.shape, None,
-                          d_cur_y, d_cur_z, d_z_by_y, self.d_obs,
-                          d_rand, #d_y_on_loglik.data, d_y_off_loglik.data,
+                          d_cur_y, d_cur_z, d_z_by_y, self.d_obs, d_rand, 
                           np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_y.shape[0]),
                           np.float32(self.lam), np.float32(self.epislon), np.float32(self.theta))
 
@@ -480,7 +479,7 @@ class Gibbs(BaseSampler):
         log_lik = 0
         if cur_z.shape[1] == 0: return -99999999.9
     
-        if self.cl_mode:
+        if False:
             a_time = time()
             d_cur_z = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = cur_z.astype(np.int32))
             d_cur_y = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = cur_y.astype(np.int32))
