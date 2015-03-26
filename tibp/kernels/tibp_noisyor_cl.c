@@ -63,18 +63,36 @@ int sample(uint a_size,  uint *a, float *p, int start, float rand) {
   return a[a_size - 1];
 }
 
+void h_translate(float *f_img, float *f_img_new,
+		 uint f_img_height, uint f_img_width, uint distance) {
+  for (int h = 0; h < f_img_height; h++) {
+    for (int w = 0; w < f_img_width; w++) {
+      f_img_new[h * f_img_width + (w + distance) % f_img_width] = f_img[h * f_img_width + w];
+    }
+  }
+}
+
+void v_translate(float *f_img, float *f_img_new,
+		 uint f_img_height, uint f_img_width, uint distance) {
+  for (int h = 0; h < f_img_height; h++) {
+    for (int w = 0; w < f_img_width; w++) {
+      f_img_new[((h + distance) % f_img_height) * f_img_width + w] = f_img[h * f_img_width + w];
+    }
+  }
+}
+
 kernel void sample_y(global int *cur_y,
 		     global int *cur_z,
 		     global int *z_by_y,
 		     global int *obs,
 		     global float *rand, 
-		     uint N, uint D, uint K,
+		     uint N, uint D, uint K, uint f_img_width,
 		     float lambda, float epislon, float theta) {
   
   uint kth = get_global_id(0); // k is the index of features
   uint dth = get_global_id(1); // d is the index of pixels
+  uint f_img_height = D / f_img_width;
   // calculate the prior probability of each cell is 1
-  //printf("kth: %d, D: %d, dth: %d\n", kth, D, dth);
   float on_loglik_temp = log(theta); 
   float off_loglik_temp = log(1 - theta);
   
@@ -83,9 +101,9 @@ kernel void sample_y(global int *cur_y,
     // if the nth object has the kth feature
     if (cur_z[n * K + kth] == 1) {
       // if the observed pixel at dth is on
-      if (obs[n * D + dth] == 1) {
+      if (obs[n * D + dth] == 1) { // this line should change to reflect transformations
 	// if the feature image previously has this pixel on
-	if (cur_y[kth * D + dth] == 1) {
+	if (cur_y[kth * D + dth] == 1) { // this line shouldn't change in tibp
 	  on_loglik_temp += log(1 - pow(1 - lambda, z_by_y[n * D + dth]) * (1 - epislon));
 	  off_loglik_temp += log(1 - pow(1 - lambda, z_by_y[n * D + dth] - 1) * (1 - epislon));
 	} else {
