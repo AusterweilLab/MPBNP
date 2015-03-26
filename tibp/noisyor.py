@@ -27,7 +27,7 @@ class Gibbs(BaseSampler):
         BaseSampler.__init__(self, cl_mode = cl_mode, cl_device = cl_device, record_best = record_best)
 
         if cl_mode:
-            program_str = open(pkg_dir + 'MPBNP/ibp/kernels/tibp_noisyor_cl.c', 'r').read()
+            program_str = open(pkg_dir + 'MPBNP/tibp/kernels/tibp_noisyor_cl.c', 'r').read()
             self.prg = cl.Program(self.ctx, program_str).build() 
 
         self.alpha = alpha # tendency to generate new features
@@ -86,12 +86,12 @@ class Gibbs(BaseSampler):
             assert(init_z.shape == (len(self.obs), self.k))
 
         if init_r is None:
-            init_r = np.zeros((self.N, self.k, self.NUM_TRANS))
+            init_r = np.random.randint(0, 2, (self.N, self.k, self.NUM_TRANS))#np.zeros((self.N, self.k, self.NUM_TRANS))
         else:
             assert(init_r is None)
 
         if self.cl_mode:
-            return self._cl_infer_yz(init_y, init_z, output_file)
+            return self._cl_infer_yzr(init_y, init_z, init_r, output_file)
         else:
             return self._infer_yzr(init_y, init_z, init_r, output_file)
 
@@ -355,6 +355,20 @@ class Gibbs(BaseSampler):
         loglik_mat = np.log(np.abs(self.obs - not_on_p))
         return loglik_mat.sum()
 
+    def _z_by_ry(self, cur_y, cur_z, cur_r):
+        """
+        """
+        z_by_ry = np.empty(shape = (cur_z.shape[0], cur_y.shape[1]), dtype=np.int64)
+        for nth in xrange(self.N):
+            nth_y = copy.deepcopy(cur_y) # the transformed cur_y with respect to nth
+            kth_feat = 0
+            for r_feat in cur_r[nth]: # r_feat refers to the transforms applied one feature
+                nth_y[kth_feat] = v_translate(nth_y[kth_feat], self.img_w, r_feat[self.V_TRANS])
+                nth_y[kth_feat] = h_translate(nth_y[kth_feat], self.img_w, r_feat[self.H_TRANS])
+                kth_feat += 1
+            z_by_ry[nth,] = np.dot(cur_z[nth], nth_y)
+        return z_by_ry
+
     def _cl_infer_yzr(self, init_y, init_z, init_r, output_file = None):
         """Wrapper function to start the inference on y and z.
         This function is not supposed to directly invoked by an end user.
@@ -406,15 +420,20 @@ class Gibbs(BaseSampler):
         d_cur_y = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = cur_y.astype(np.int32))
         d_cur_z = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = cur_z.astype(np.int32))
         d_cur_r = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = cur_r.astype(np.int32))
-        d_z_by_y = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
-                             hostbuf = np.dot(cur_z, cur_y).astype(np.int32))
+        d_z_by_ry = cl.array.zeros(self.queue, (cur_z.shape[0], cur_y.shape[1]), np.int32)
         d_rand = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
                            hostbuf=np.random.random(size = cur_y.shape).astype(np.float32))
+        
+        self.prg.compute_z_by_ry(self.queue, cur_z.shape, (1, cur_z.shape[1]),
+                                 d_cur_y, d_cur_z, d_cur_r, d_z_by_ry.data, 
+                                 cl.LocalMemory(cur_y.nbytes), cl.LocalMemory(cur_y.nbytes),
+                                 np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_y.shape[0]),
+                                 np.int32(self.img_w))
 
         # calculate the prior probability that a pixel is on
         self.prg.sample_y(self.queue, cur_y.shape, None,
-                          d_cur_y, d_cur_z, d_z_by_y, self.d_obs, d_rand, 
-                          np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_y.shape[0]),
+                          d_cur_y, d_cur_z, d_z_by_ry.data, d_cur_r, self.d_obs, d_rand, 
+                          np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_y.shape[0]), np.int32(self.img_w),
                           np.float32(self.lam), np.float32(self.epislon), np.float32(self.theta))
 
         cl.enqueue_copy(self.queue, cur_y, d_cur_y)

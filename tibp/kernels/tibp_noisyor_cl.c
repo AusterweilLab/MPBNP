@@ -63,35 +63,92 @@ int sample(uint a_size,  uint *a, float *p, int start, float rand) {
   return a[a_size - 1];
 }
 
-void h_translate(float *f_img, float *f_img_new,
-		 uint f_img_height, uint f_img_width, uint distance) {
+void v_translate(local int *orig_y, local int *new_y, uint kth,
+		 uint f_img_height, uint f_img_width, uint distance,
+		 uint D) {
   for (int h = 0; h < f_img_height; h++) {
     for (int w = 0; w < f_img_width; w++) {
-      f_img_new[h * f_img_width + (w + distance) % f_img_width] = f_img[h * f_img_width + w];
+      new_y[kth * D + ((h + distance) % f_img_height) * f_img_width + w] = 
+	orig_y[kth * D + h * f_img_width + w];
     }
   }
 }
 
-void v_translate(float *f_img, float *f_img_new,
-		 uint f_img_height, uint f_img_width, uint distance) {
+void h_translate(local int *orig_y, local int *new_y, uint kth,
+		 uint f_img_height, uint f_img_width, uint distance,
+		 uint D) {
   for (int h = 0; h < f_img_height; h++) {
     for (int w = 0; w < f_img_width; w++) {
-      f_img_new[((h + distance) % f_img_height) * f_img_width + w] = f_img[h * f_img_width + w];
+      new_y[kth * D + h * f_img_width + (w + distance) % f_img_width] = 
+	orig_y[kth * D + h * f_img_width + w];
+    }
+  }
+}
+
+kernel void compute_z_by_ry(global int *cur_y, global int *cur_z, global int *cur_r,
+			    global int *z_by_ry, local int *orig_y, local int *new_y,
+			    uint N, uint D, uint K, uint f_img_width) {
+
+  const uint V_TRANS = 0, H_TRANS = 1, NUM_TRANS = 2;
+  uint nth = get_global_id(0); // nth is the index of images
+  uint kth = get_global_id(1); // kth is the index of features
+  uint f_img_height = D / f_img_width;
+
+  // copy the original feature image to local memory
+  for (int dth = 0; dth < D; dth++) {
+    orig_y[kth * D + dth] = cur_y[kth * D + dth];
+  }
+  // wait until copying is done
+  barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE); 
+
+  // transform the feature image
+  uint v_dist = cur_r[nth * (K * NUM_TRANS) + kth * NUM_TRANS + V_TRANS];
+  v_translate(orig_y, new_y, kth, f_img_height, f_img_width, v_dist, D);
+  
+  // copy new_y back to orig_y so that new_y can be used again
+  for (int dth = 0; dth < D; dth++) {
+    orig_y[kth * D + dth] = new_y[kth * D + dth];
+  }
+
+  // wait until copying is done
+  barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE); 
+
+  uint h_dist = cur_r[nth * (K * NUM_TRANS) + kth * NUM_TRANS + H_TRANS];
+  h_translate(orig_y, new_y, kth, f_img_height, f_img_width, h_dist, D);
+
+  // wait until all transformation is done
+  barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE); 
+
+  /* at this point, for each image, a transformed y (new_y) has been generated */
+  if (kth == 0) {
+    for (int k = 0; k < K; k++) {
+      for (int dth = 0; dth < D; dth++) {
+	z_by_ry[nth * D + dth] += new_y[k * D + dth] * cur_z[nth * K + k];
+      }
     }
   }
 }
 
 kernel void sample_y(global int *cur_y,
 		     global int *cur_z,
-		     global int *z_by_y,
+		     global int *z_by_ry,
+		     global int *cur_r,
 		     global int *obs,
 		     global float *rand, 
 		     uint N, uint D, uint K, uint f_img_width,
 		     float lambda, float epislon, float theta) {
   
+  const uint V_TRANS = 0, H_TRANS = 1, NUM_TRANS = 2;
+
   uint kth = get_global_id(0); // k is the index of features
   uint dth = get_global_id(1); // d is the index of pixels
+
   uint f_img_height = D / f_img_width;
+
+  // unpack dth into h and w
+  uint h = dth / f_img_width;
+  uint w = dth % f_img_width;
+
   // calculate the prior probability of each cell is 1
   float on_loglik_temp = log(theta); 
   float off_loglik_temp = log(1 - theta);
@@ -100,15 +157,20 @@ kernel void sample_y(global int *cur_y,
   for (int n = 0; n < N; n++) {
     // if the nth object has the kth feature
     if (cur_z[n * K + kth] == 1) {
+      // retrieve the transformation applied to this feature by this object
+      uint v_dist = cur_r[n * (K * NUM_TRANS) + kth * NUM_TRANS + V_TRANS];
+      uint h_dist = cur_r[n * (K * NUM_TRANS) + kth * NUM_TRANS + H_TRANS];
+      uint new_index = ((v_dist + h) % f_img_height) * f_img_width + (h_dist + w) % f_img_width;
+
       // if the observed pixel at dth is on
-      if (obs[n * D + dth] == 1) { // this line should change to reflect transformations
+      if (obs[n * D + new_index] == 1) { // transformed feature affects the pixel at new_index not dth, cf., ibp
 	// if the feature image previously has this pixel on
-	if (cur_y[kth * D + dth] == 1) { // this line shouldn't change in tibp
-	  on_loglik_temp += log(1 - pow(1 - lambda, z_by_y[n * D + dth]) * (1 - epislon));
-	  off_loglik_temp += log(1 - pow(1 - lambda, z_by_y[n * D + dth] - 1) * (1 - epislon));
+	if (cur_y[kth * D + dth] == 1) { // this is dth instead of new_index because we are referring to the original y
+	  on_loglik_temp += log(1 - pow(1 - lambda, z_by_ry[n * D + new_index]) * (1 - epislon));
+	  off_loglik_temp += log(1 - pow(1 - lambda, z_by_ry[n * D + new_index] - 1) * (1 - epislon));
 	} else {
-	  on_loglik_temp += log(1 - pow(1 - lambda, z_by_y[n * D + dth] + 1) * (1 - epislon));
-	  off_loglik_temp += log(1 - pow(1 - lambda, z_by_y[n * D + dth]) * (1 - epislon));
+	  on_loglik_temp += log(1 - pow(1 - lambda, z_by_ry[n * D + new_index] + 1) * (1 - epislon));
+	  off_loglik_temp += log(1 - pow(1 - lambda, z_by_ry[n * D + new_index]) * (1 - epislon));
 	}
       } else {
 	on_loglik_temp += log(1 - lambda);
