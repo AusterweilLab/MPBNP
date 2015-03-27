@@ -6,7 +6,6 @@ import sys, os.path
 pkg_dir = os.path.dirname(os.path.realpath(__file__)) + '/../../'
 sys.path.append(pkg_dir)
 
-import pyopencl.array
 from scipy.stats import t
 from collections import Counter
 from MPBNP import *
@@ -40,6 +39,10 @@ class CollapsedGibbs(BaseSampler):
         for row in self.obs:
             self.new_obs.append([float(_) for _ in row])
         self.obs = np.array(self.new_obs).astype(np.float32)
+
+        #self.d_data = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = self.obs)
+        self.d_data = cl.array.to_device(queue=self.queue, ary=self.obs, allocator=self.mem_pool)
+
         return
         
     def do_inference(self, init_labels = None, output_file = None):
@@ -134,7 +137,7 @@ class CollapsedGibbs(BaseSampler):
         if self.record_best:
             self.auto_save_sample(cluster_labels)
 
-        d_data = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = self.obs[:,0])
+        #d_labels = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = cluster_labels)
         d_labels = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = cluster_labels)
         
         if output_file is not None: print(*xrange(self.N), file = output_file, sep = ',')
@@ -160,30 +163,35 @@ class CollapsedGibbs(BaseSampler):
                     suf_stats[label_index] = (label, cluster_mu, cluster_ss, cluster_obs.shape[0])
 
             gpu_a_time = time()
-            d_uniq_label = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = uniq_labels)
-            d_mu = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
-                             hostbuf = suf_stats[:,1].astype(np.float32))
-            d_ss = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
-                             hostbuf = suf_stats[:,2].astype(np.float32))
-            d_n = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
-                            hostbuf = suf_stats[:,3].astype(np.int32))
-            d_logpost = cl.array.empty(self.queue,(self.obs.shape[0], uniq_labels.shape[0]), np.float32)
-            d_rand = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
-                               hostbuf = np.random.random(self.obs.shape).astype(np.float32))
+            #d_uniq_label = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = uniq_labels)
+            d_uniq_label = cl.array.to_device(self.queue, uniq_labels, allocator=self.mem_pool)
+            #d_mu = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
+            #                 hostbuf = suf_stats[:,1].astype(np.float32))
+            d_mu = cl.array.to_device(self.queue, suf_stats[:,1].astype(np.float32), allocator=self.mem_pool)
+            #d_ss = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
+            #                 hostbuf = suf_stats[:,2].astype(np.float32))
+            d_ss = cl.array.to_device(self.queue, suf_stats[:,2].astype(np.float32), allocator=self.mem_pool)
+            #d_n = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
+            #                hostbuf = suf_stats[:,3].astype(np.int32))
+            d_n = cl.array.to_device(self.queue, suf_stats[:,3].astype(np.int32), allocator=self.mem_pool)
+            d_logpost = cl.array.empty(self.queue,(self.obs.shape[0], uniq_labels.shape[0]), np.float32, allocator=self.mem_pool)
+            #d_rand = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
+            #                   hostbuf = np.random.random(self.obs.shape).astype(np.float32))
+            d_rand = cl.array.to_device(self.queue, np.random.random(self.obs.shape).astype(np.float32), allocator=self.mem_pool)
 
             if self.device_type == cl.device_type.CPU:
                 self.prg.normal_1d_logpost_loopy(self.queue, self.obs.shape, None,
-                                                 d_labels, d_data, d_uniq_label, d_mu, d_ss, d_n, 
-                                                 np.int32(uniq_labels.shape[0]), d_hyper_param, d_rand,
+                                                 d_labels, self.d_data.data, d_uniq_label.data, d_mu.data, d_ss.data, d_n.data, 
+                                                 np.int32(uniq_labels.shape[0]), d_hyper_param, d_rand.data,
                                                  d_logpost.data)
             else:
                 self.prg.normal_1d_logpost(self.queue, (self.obs.shape[0], uniq_labels.shape[0]), None,
-                                           d_labels, d_data, d_uniq_label, d_mu, d_ss, d_n, 
-                                           np.int32(uniq_labels.shape[0]), d_hyper_param, d_rand,
+                                           d_labels, self.d_data.data, d_uniq_label.data, d_mu.data, d_ss.data, d_n.data, 
+                                           np.int32(uniq_labels.shape[0]), d_hyper_param, d_rand.data,
                                            d_logpost.data)
                 self.prg.resample_labels(self.queue, (self.obs.shape[0],), None,
-                                         d_labels, d_uniq_label, np.int32(uniq_labels.shape[0]),
-                                         d_rand, d_logpost.data)
+                                         d_labels, d_uniq_label.data, np.int32(uniq_labels.shape[0]),
+                                         d_rand.data, d_logpost.data)
 
             temp_cluster_labels = np.empty(cluster_labels.shape, dtype=np.int32)
             cl.enqueue_copy(self.queue, temp_cluster_labels, d_labels)
@@ -298,7 +306,7 @@ class CollapsedGibbs(BaseSampler):
 
         # push data and initial labels onto the openCL device
         # data won't change, labels are modified on the device
-        d_data = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = self.obs)
+        #d_data = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = self.obs)
         d_labels = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = cluster_labels)
 
         if output_file is not None: print(*xrange(data_size), file = output_file, sep = ',')
@@ -343,8 +351,8 @@ class CollapsedGibbs(BaseSampler):
             d_mu = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = h_mu)
             d_cov_mu0 = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = h_cov_mu0)
             d_cov_obs = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = h_cov_obs)
-            d_sigma = cl.array.empty(self.queue, h_cov_obs.shape, np.float32)
-
+            d_sigma = cl.array.empty(self.queue, h_cov_obs.shape, np.float32, allocator=self.mem_pool)
+            
             self.prg.normal_kd_sigma_matrix(self.queue, h_cov_obs.shape, None,
                                             d_n, d_cov_obs, d_cov_mu0, 
                                             d_T0, gaussian_k0, wishart_v0, d_sigma.data)
@@ -358,19 +366,19 @@ class CollapsedGibbs(BaseSampler):
             d_determinants = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = h_determinants)
             d_inverses = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = h_inverses)
             d_rand = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = np.random.random(data_size).astype(np.float32))
-            d_logpost = cl.array.empty(self.queue, (data_size, uniq_labels.shape[0]), np.float32)
+            d_logpost = cl.array.empty(self.queue, (data_size, uniq_labels.shape[0]), np.float32, allocator = self.mem_pool)
 
             # if the OpenCL device is CPU, use the kernel with loops over clusters
             if self.device_type == cl.device_type.CPU:
                 self.prg.normal_kd_logpost_loopy(self.queue, (self.obs.shape[0],), None,
-                                                 d_labels, d_data, d_uniq_label, 
+                                                 d_labels, self.d_data.data, d_uniq_label, 
                                                  d_mu, d_n, d_determinants, d_inverses,
                                                  num_of_clusters, np.float32(self.alpha),
                                                  dim, wishart_v0, d_logpost.data, d_rand)
             # otherwise, use the kernel that fully unrolls data points and clusters
             else:
                 self.prg.normal_kd_logpost(self.queue, (self.obs.shape[0], uniq_labels.shape[0]), None, 
-                                           d_labels, d_data, d_uniq_label, 
+                                           d_labels, self.d_data.data, d_uniq_label, 
                                            d_mu, d_n, d_determinants, d_inverses,
                                            num_of_clusters, np.float32(self.alpha),
                                            dim, wishart_v0, d_logpost.data, d_rand)
@@ -428,14 +436,13 @@ class CollapsedGibbs(BaseSampler):
 
         if dim == 1 and self.cl_mode:
             gpu_a_time = time()
-            d_data = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = self.obs[:,0])
             d_labels = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = sample)
             d_hyper_param = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
                                       hostbuf = np.array([self.gaussian_mu0, self.gaussian_k0, 
                                                           self.gamma_alpha0, self.gamma_beta0, self.alpha]).astype(np.float32))
-            d_logprob = cl.array.empty(self.queue, (self.N,), np.float32)
+            d_logprob = cl.array.empty(self.queue, (self.N,), np.float32, allocator=self.mem_pool)
             self.prg.joint_logprob(self.queue, self.obs.shape, None,
-                                   d_labels, d_data, d_hyper_param, d_logprob.data)
+                                   d_labels, self.d_data.data, d_hyper_param, d_logprob.data)
             
             total_logprob = d_logprob.get().sum()
             self.gpu_time += time() - gpu_a_time

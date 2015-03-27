@@ -2,8 +2,7 @@
 #-*- coding: utf-8 -*-
 
 from __future__ import print_function
-import pyopencl as cl, numpy as np
-import pyopencl.array
+import numpy as np
 import sys, copy, random, math, csv, gzip, mimetypes, os.path
 from time import time
 
@@ -49,6 +48,9 @@ class BaseSampler(object):
         """Initialize the class.
         """
         if cl_mode:
+            import pyopencl as cl
+            import pyopencl.array, pyopencl.tools
+            
             if cl_device == 'gpu':
                 gpu_devices = []
                 for platform in cl.get_platforms():
@@ -65,6 +67,7 @@ class BaseSampler(object):
                 self.ctx = cl.create_some_context()
 
             self.queue = cl.CommandQueue(self.ctx)
+            self.mem_pool = cl.tools.MemoryPool(cl.tools.ImmediateAllocator(self.queue)) 
             self.mf = cl.mem_flags
             self.device = self.ctx.get_info(cl.context_info.DEVICES)[0]
             self.device_type = self.device.type
