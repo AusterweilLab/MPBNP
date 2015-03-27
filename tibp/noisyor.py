@@ -217,9 +217,6 @@ class Gibbs(BaseSampler):
         cur_y = cur_y[active_feat_col[0],:]
         cur_r = np.array([_[active_feat_col[0],:] for _ in cur_r])
 
-        # the above two steps need to be done before sampling new features
-        # because new features are initialized randomly
-        
         # update self.k
         self.k = cur_z.shape[1]
         
@@ -274,7 +271,7 @@ class Gibbs(BaseSampler):
         # propose feature images by sampling from the prior distribution
         cur_y_new = np.vstack((cur_y, np.random.binomial(1, self.theta, (k_new_count, self.d))))
         cur_r_new = np.array([np.vstack((_, np.zeros((k_new_count, self.NUM_TRANS)))) for _ in cur_r])
-        return cur_y_new.astype(np.int32), cur_z_new.astype(np.int32), cur_r_new
+        return cur_y_new.astype(np.int32), cur_z_new.astype(np.int32), cur_r_new.astype(np.int32)
 
     def _sample_lam(self, cur_y, cur_z):
         """Resample the value of lambda.
@@ -423,7 +420,8 @@ class Gibbs(BaseSampler):
         d_z_by_ry = cl.array.zeros(self.queue, (cur_z.shape[0], cur_y.shape[1]), np.int32)
         d_rand = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
                            hostbuf=np.random.random(size = cur_y.shape).astype(np.float32))
-        
+
+        # first transform the feature images and calculate z_by_ry
         self.prg.compute_z_by_ry(self.queue, cur_z.shape, (1, cur_z.shape[1]),
                                  d_cur_y, d_cur_z, d_cur_r, d_z_by_ry.data, 
                                  cl.LocalMemory(cur_y.nbytes), cl.LocalMemory(cur_y.nbytes),
@@ -433,50 +431,62 @@ class Gibbs(BaseSampler):
         # calculate the prior probability that a pixel is on
         self.prg.sample_y(self.queue, cur_y.shape, None,
                           d_cur_y, d_cur_z, d_z_by_ry.data, d_cur_r, self.d_obs, d_rand, 
-                          np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_y.shape[0]), np.int32(self.img_w),
+                          np.int32(self.N), np.int32(self.d), np.int32(cur_y.shape[0]), np.int32(self.img_w),
                           np.float32(self.lam), np.float32(self.epislon), np.float32(self.theta))
 
         cl.enqueue_copy(self.queue, cur_y, d_cur_y)
         return cur_y
 
-    def _cl_infer_z(self, cur_y, cur_z):
+    def _cl_infer_z(self, cur_y, cur_z, cur_r):
         """Infer feature ownership
         """
         d_cur_y = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = cur_y.astype(np.int32))
         d_cur_z = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = cur_z.astype(np.int32))
-        d_z_by_y = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
-                             hostbuf = np.dot(cur_z, cur_y).astype(np.int32))
+        d_cur_r = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = cur_r.astype(np.int32))
+        d_z_by_ry = cl.array.zeros(self.queue, (cur_z.shape[0], cur_y.shape[1]), np.int32)
         d_z_col_sum = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, 
                                 hostbuf = cur_z.sum(axis = 0).astype(np.int32))
         d_rand = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
                            hostbuf=np.random.random(size = cur_z.shape).astype(np.float32))
 
+        # first transform the feature images and calculate z_by_ry
+        self.prg.compute_z_by_ry(self.queue, cur_z.shape, (1, cur_z.shape[1]),
+                                 d_cur_y, d_cur_z, d_cur_r, d_z_by_ry.data, 
+                                 cl.LocalMemory(cur_y.nbytes), cl.LocalMemory(cur_y.nbytes),
+                                 np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_y.shape[0]),
+                                 np.int32(self.img_w))
+
         # calculate the prior probability that a pixel is on
         self.prg.sample_z(self.queue, cur_z.shape, None,
-                          d_cur_y, d_cur_z, d_z_by_y, d_z_col_sum, self.d_obs, d_rand, 
-                          np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_z.shape[1]),
+                          d_cur_y, d_cur_z, d_cur_r, d_z_by_ry.data, d_z_col_sum, self.d_obs, d_rand, 
+                          np.int32(self.N), np.int32(self.d), np.int32(cur_y.shape[0]), np.int32(self.img_w),
                           np.float32(self.lam), np.float32(self.epislon), np.float32(self.theta))
 
         cl.enqueue_copy(self.queue, cur_z, d_cur_z)
         return cur_z
         
-    def _cl_infer_k_new(self, cur_y, cur_z):
+    def _cl_infer_k_new(self, cur_y, cur_z, cur_r):
 
         # sample new features use importance sampling
-        k_new = self._sample_k_new(cur_y, cur_z)
+        k_new = self._sample_k_new(cur_y, cur_z, cur_r)
         if k_new:
-            cur_y, cur_z = k_new
+            cur_y, cur_z, cur_r = k_new
 
         # delete empty feature images
         non_empty_feat_img = np.where(cur_y.sum(axis = 1) > 0)
         cur_y = cur_y[non_empty_feat_img[0],:].astype(np.int32)
         cur_z = cur_z[:,non_empty_feat_img[0]].astype(np.int32)
-            
+        cur_r = np.array([_[non_empty_feat_img[0],:] for _ in cur_r]).astype(np.int32)
+        
         # delete null features
-        inactive_feat_col = np.where(cur_z.sum(axis = 0) == 0)
-        cur_z = np.delete(cur_z, inactive_feat_col[0], axis=1).astype(np.int32)
-        cur_y = np.delete(cur_y, inactive_feat_col[0], axis=0).astype(np.int32)
-            
+        active_feat_col = np.where(cur_z.sum(axis = 0) > 0)
+        cur_z = cur_z[:,active_feat_col[0]].astype(np.int32)
+        cur_y = cur_y[active_feat_col[0],:].astype(np.int32)
+        cur_r = np.array([_[active_feat_col[0],:] for _ in cur_r]).astype(np.int32)
+
+        # update self.k
+        self.k = cur_z.shape[1]
+
         z_s0, z_s1 = cur_z.shape
         cur_z = cur_z.reshape((z_s0 * z_s1, 1))
         cur_z = cur_z.reshape((z_s0, z_s1))
@@ -485,10 +495,11 @@ class Gibbs(BaseSampler):
         cur_y = cur_y.reshape((y_s0 * y_s1, 1))
         cur_y = cur_y.reshape((y_s0, y_s1))
 
-        # update self.k
-        self.k = cur_z.shape[1]
-        
-        return cur_y, cur_z
+        r_s0, r_s1, r_s2 = cur_r.shape
+        cur_r = cur_r.reshape((r_s0 * r_s1 * r_s2, 1))
+        cur_r = cur_r.reshape((r_s0, r_s1, r_s2))
+
+        return cur_y, cur_z, cur_r
 
     def _logprob(self, sample):
         """Calculate the joint log probability of data and model given a sample.
