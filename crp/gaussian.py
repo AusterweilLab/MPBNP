@@ -40,8 +40,8 @@ class CollapsedGibbs(BaseSampler):
             self.new_obs.append([float(_) for _ in row])
         self.obs = np.array(self.new_obs).astype(np.float32)
 
-        #self.d_data = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = self.obs)
-        self.d_data = cl.array.to_device(queue=self.queue, ary=self.obs, allocator=self.mem_pool)
+        #self.d_obs = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = self.obs)
+        self.d_obs = cl.array.to_device(queue=self.queue, ary=self.obs, allocator=self.mem_pool)
 
         return
         
@@ -181,12 +181,12 @@ class CollapsedGibbs(BaseSampler):
 
             if self.device_type == cl.device_type.CPU:
                 self.prg.normal_1d_logpost_loopy(self.queue, self.obs.shape, None,
-                                                 d_labels, self.d_data.data, d_uniq_label.data, d_mu.data, d_ss.data, d_n.data, 
+                                                 d_labels, self.d_obs.data, d_uniq_label.data, d_mu.data, d_ss.data, d_n.data, 
                                                  np.int32(uniq_labels.shape[0]), d_hyper_param, d_rand.data,
                                                  d_logpost.data)
             else:
                 self.prg.normal_1d_logpost(self.queue, (self.obs.shape[0], uniq_labels.shape[0]), None,
-                                           d_labels, self.d_data.data, d_uniq_label.data, d_mu.data, d_ss.data, d_n.data, 
+                                           d_labels, self.d_obs.data, d_uniq_label.data, d_mu.data, d_ss.data, d_n.data, 
                                            np.int32(uniq_labels.shape[0]), d_hyper_param, d_rand.data,
                                            d_logpost.data)
                 self.prg.resample_labels(self.queue, (self.obs.shape[0],), None,
@@ -371,14 +371,14 @@ class CollapsedGibbs(BaseSampler):
             # if the OpenCL device is CPU, use the kernel with loops over clusters
             if self.device_type == cl.device_type.CPU:
                 self.prg.normal_kd_logpost_loopy(self.queue, (self.obs.shape[0],), None,
-                                                 d_labels, self.d_data.data, d_uniq_label, 
+                                                 d_labels, self.d_obs.data, d_uniq_label, 
                                                  d_mu, d_n, d_determinants, d_inverses,
                                                  num_of_clusters, np.float32(self.alpha),
                                                  dim, wishart_v0, d_logpost.data, d_rand)
             # otherwise, use the kernel that fully unrolls data points and clusters
             else:
                 self.prg.normal_kd_logpost(self.queue, (self.obs.shape[0], uniq_labels.shape[0]), None, 
-                                           d_labels, self.d_data.data, d_uniq_label, 
+                                           d_labels, self.d_obs.data, d_uniq_label, 
                                            d_mu, d_n, d_determinants, d_inverses,
                                            num_of_clusters, np.float32(self.alpha),
                                            dim, wishart_v0, d_logpost.data, d_rand)
@@ -442,7 +442,7 @@ class CollapsedGibbs(BaseSampler):
                                                           self.gamma_alpha0, self.gamma_beta0, self.alpha]).astype(np.float32))
             d_logprob = cl.array.empty(self.queue, (self.N,), np.float32, allocator=self.mem_pool)
             self.prg.joint_logprob(self.queue, self.obs.shape, None,
-                                   d_labels, self.d_data.data, d_hyper_param, d_logprob.data)
+                                   d_labels, self.d_obs.data, d_hyper_param, d_logprob.data)
             
             total_logprob = d_logprob.get().sum()
             self.gpu_time += time() - gpu_a_time
