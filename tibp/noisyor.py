@@ -6,7 +6,6 @@ import sys, os.path, itertools, cPickle
 pkg_dir = os.path.dirname(os.path.realpath(__file__)) + '/../../'
 sys.path.append(pkg_dir)
 
-import pyopencl.array
 from scipy.stats import poisson
 from MPBNP import *
 from MPBNP import BaseSampler, BasePredictor
@@ -509,25 +508,46 @@ class Gibbs(BaseSampler):
         log_lik = 0
         if cur_z.shape[1] == 0: return -99999999.9
     
-        if False:
+        if self.cl_mode:
             a_time = time()
             d_cur_z = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = cur_z.astype(np.int32))
             d_cur_y = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = cur_y.astype(np.int32))
-            d_logprob = cl.array.empty(self.queue, (cur_z.shape[0],), np.float32)
-            #d_novel_f = cl.array.empty(self.queue, cur_z.shape, np.int32)
+            d_cur_r = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = cur_r.astype(np.int32))
+            d_z_by_ry = cl.array.zeros(self.queue, (cur_z.shape[0], cur_y.shape[1]), np.int32)
+            
+            # calculate the log prior of Z
+            d_logprior_z = cl.array.empty(self.queue, cur_z.shape, np.float32)
+            self.prg.logprior_z(self.queue, cur_z.shape, (1, cur_z.shape[1]), 
+                                d_cur_z, d_logprior_z.data, cl.LocalMemory(cur_z[0].nbytes),
+                                np.int32(self.N), np.int32(cur_y.shape[1]), np.int32(cur_z.shape[1]), 
+                                np.float32(self.alpha))
 
-            self.prg.logprob_z_data(self.queue, (cur_z.shape[0],), None, 
-                                    d_cur_z, d_cur_y, self.d_obs, d_logprob.data, #d_novel_f.data,
-                                    np.int32(self.N), np.int32(cur_y.shape[1]), np.int32(cur_z.shape[1]), 
-                                    np.float32(self.alpha), np.float32(self.lam), np.float32(self.epislon))
-            log_lik = d_logprob.get().sum()
+            # calculate the loglikelihood of data
+            # first transform the feature images and calculate z_by_ry
+            self.prg.compute_z_by_ry(self.queue, cur_z.shape, (1, cur_z.shape[1]),
+                                     d_cur_y, d_cur_z, d_cur_r, d_z_by_ry.data, 
+                                     cl.LocalMemory(cur_y.nbytes), cl.LocalMemory(cur_y.nbytes),
+                                     np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_y.shape[0]),
+                                     np.int32(self.img_w))
+            
+            #self.prg.logprob_z_data(self.queue, (cur_z.shape[0],), None, 
+            #                        d_cur_z, d_z_by_ry.data, self.d_obs, d_logprob.data, 
+            #                        np.int32(self.N), np.int32(cur_y.shape[1]), np.int32(cur_z.shape[1]), 
+            #                        np.float32(self.alpha), np.float32(self.lam), np.float32(self.epislon))
+
+            d_loglik_y = cl.array.empty(self.queue, d_z_by_ry.shape, np.float32)
+            self.prg.loglik_y(self.queue, d_z_by_ry.shape, None, 
+                              d_z_by_ry.data, self.d_obs, d_loglik_y.data,
+                              np.int32(self.N), np.int32(cur_y.shape[1]), np.int32(cur_z.shape[1]), 
+                              np.float32(self.lam), np.float32(self.epislon))
+            
+            log_lik = d_loglik_y.get().sum()
             self.gpu_time += time() - a_time
 
             # calculate the prior probability of Y
-            num_on = (cur_y == 1).sum()
-            num_off = (cur_y == 0).sum()
-            log_prior = num_on * np.log(self.theta) + num_off * np.log(1 - self.theta)
-
+            num_on, num_off = (cur_y == 1).sum(), (cur_y == 0).sum()
+            log_prior = num_on * np.log(self.theta) + num_off * np.log(1 - self.theta) + d_logprior_z.get().sum()
+            
         else:
             # calculate the prior probability of Z
             for n in xrange(cur_z.shape[0]):

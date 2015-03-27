@@ -248,10 +248,9 @@ kernel void sample_z(global int *cur_y,
   cur_z[nth * K + kth] = sample(2, labels, post, 0, rand[nth * K + kth]);
   //printf("after index: %d %f %f %d \n", nth * K + kth, post[0], post[1], cur_z[nth * K + kth]);
 }
-
      
 kernel void logprob_z_data(global int *cur_z,
-			   global int *cur_y,
+			   global int *z_by_ry,
 			   global int *obs,
 			   global float *logprob,
 			   uint N, uint D, uint K,
@@ -286,14 +285,11 @@ kernel void logprob_z_data(global int *cur_z,
   }
 
   /* calculate the log-likelihood of the nth row of data
-     given the corresponding row in Z and Y
+     given the corresponding row in z_by_ry
   */
   uint weight;
   for (int d = 0; d < D; d++) {
-    weight = 0;
-    for (int k = 0; k < K; k++) {
-      weight += cur_y[k * D + d] * cur_z[nth * K + k];
-    }
+    weight = z_by_ry[nth * D + d];
     if (obs[nth * D + d] == 1) {
       logprob_temp += log(1 - pow(1 - lambda, weight) * (1 - epislon));
     } else {
@@ -301,4 +297,67 @@ kernel void logprob_z_data(global int *cur_z,
     }
   }
   logprob[nth] = logprob_temp;
+}
+
+kernel void logprior_z(global int *cur_z,
+		       global float *logprob,
+		       local uint *novel_feat,
+		       uint N, uint D, uint K,
+		       float alpha) {
+  
+  uint nth = get_global_id(0); // nth is the index of data
+  uint kth = get_global_id(1); // kth is the index of features
+  uint m = 0;
+  float logprob_temp = 0;
+  novel_feat[kth] = 0;
+  
+  /* calculate the log probability of the nth row of Z 
+     i.e., the prior probability of having the features
+     of the nth object.
+   */
+  for (int n = 0; n < nth; n++) {
+    m += cur_z[n * K + kth];
+  }
+  if (m > 0) { // if other objects have had this feature
+    if (cur_z[nth * K + kth] == 1) {
+      logprob_temp += log(m / (nth + 1.0f));
+    }
+    else {
+      logprob_temp += log(1 - m / (nth + 1.0f));
+    }
+  } else { // if this is a novel feature
+    if (cur_z[nth * K + kth] == 1) novel_feat[kth] = 1;
+  }
+
+  // wait until tallying is done
+  barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE);
+
+  if (kth == 0) {
+    uint novel_count = 0;
+    for (int i = 0; i < K; i++) {
+      novel_count += novel_feat[i];
+    }
+    logprob_temp += (novel_count > 0) * pois_logpmf(novel_count, alpha / (nth+1.0f));
+  }
+  logprob[nth * K + kth] = logprob_temp;
+}
+
+kernel void loglik_y(global int *z_by_ry,
+		      global int *obs,
+		      global float *loglik_y,
+		      uint N, uint D, uint K,
+		      float lambda, float epislon) {
+
+  uint nth = get_global_id(0); // nth is the index of data
+  uint dth = get_global_id(1); // dth is the index of flattened pixels
+
+  /* calculate the log-likelihood of the nth row of data
+     given the corresponding row in z_by_ry
+  */
+  uint weight = z_by_ry[nth * D + dth];
+  if (obs[nth * D + dth] == 1) {
+    loglik_y[nth * D + dth] = log(1 - pow(1 - lambda, weight) * (1 - epislon));
+  } else {
+    loglik_y[nth * D + dth] = weight * log(1 - lambda) + log(1 - epislon);
+  }
 }
