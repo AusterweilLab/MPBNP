@@ -421,7 +421,7 @@ class Gibbs(BaseSampler):
         d_cur_y = cl.array.to_device(self.queue, cur_y.astype(np.int32), allocator=self.mem_pool)
         d_cur_r = cl.array.to_device(self.queue, cur_r.astype(np.int32), allocator=self.mem_pool)
         d_z_by_ry = cl.array.zeros(self.queue, (cur_z.shape[0], cur_y.shape[1]), np.int32, allocator=self.mem_pool)
-        d_rand = cl.clrandom.rand(self.queue, cur_y.shape, np.float32, a=0, b=1)
+        d_rand = cl.array.to_device(self.queue, np.random.random(cur_y.shape).astype(np.float32), allocator=self.mem_pool)
 
         # first transform the feature images and calculate z_by_ry
         self.prg.compute_z_by_ry(self.queue, cur_z.shape, (1, cur_z.shape[1]),
@@ -450,7 +450,7 @@ class Gibbs(BaseSampler):
         d_z_col_sum = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
                                 hostbuf = cur_z.sum(axis = 0).astype(np.int32))
         #d_rand = cl.array.to_device(self.queue, np.random.random(size = cur_z.shape).astype(np.float32), allocator=self.mem_pool)
-        d_rand = cl.clrandom.rand(self.queue, cur_z.shape, np.float32, a=0, b=1)
+        d_rand = cl.array.to_device(self.queue, np.random.random(cur_z.shape).astype(np.float32), allocator=self.mem_pool)
 
         # first transform the feature images and calculate z_by_ry
         self.prg.compute_z_by_ry(self.queue, cur_z.shape, (1, cur_z.shape[1]),
@@ -535,7 +535,7 @@ class Gibbs(BaseSampler):
 
         # reject or accept newly proposed transformations on a per-object basis
         d_replace_r = cl.array.empty(self.queue, (self.N,), np.int32, allocator=self.mem_pool)
-        d_rand = cl.clrandom.rand(self.queue, (self.N,), np.float32, a=0, b=1)
+        d_rand = cl.array.to_device(self.queue, np.random.random(self.N).astype(np.float32), allocator=self.mem_pool)
         
         self.prg.sample_r(self.queue, (self.N, ), None,
                           d_replace_r.data, d_z_by_ry_old.data, d_z_by_ry_new.data, self.d_obs, d_rand.data,
@@ -570,7 +570,7 @@ class Gibbs(BaseSampler):
 
         # reject or accept newly proposed transformations on a per-object basis
         d_replace_r.fill(0)# = cl.array.empty(self.queue, (self.N,), np.int32)
-        d_rand = cl.clrandom.rand(self.queue, (self.N,), np.float32, a=0, b=1)
+        d_rand = cl.array.to_device(self.queue, np.random.random(self.N).astype(np.float32), allocator=self.mem_pool)
         
         self.prg.sample_r(self.queue, (self.N, ), None,
                           d_replace_r.data, d_z_by_ry_old.data, d_z_by_ry_new.data, self.d_obs, d_rand.data,
