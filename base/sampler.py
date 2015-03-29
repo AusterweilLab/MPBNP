@@ -49,7 +49,7 @@ class BaseSampler(object):
         """
         if cl_mode:
             import pyopencl as cl
-            import pyopencl.array, pyopencl.tools
+            import pyopencl.array, pyopencl.tools, pyopencl.clrandom
             
             if cl_device == 'gpu':
                 gpu_devices = []
