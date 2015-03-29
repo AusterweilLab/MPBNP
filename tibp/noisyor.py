@@ -224,6 +224,8 @@ class Gibbs(BaseSampler):
     def _infer_r(self, cur_y, cur_z, cur_r):
         """Infer transformations.
         """
+        rand_v = np.random.randint(0, self.img_h, size=(cur_z.shape[0], cur_z.shape[1]))
+        rand_h = np.random.randint(0, self.img_w, size=(cur_z.shape[0], cur_z.shape[1]))
         # iterate over each transformation and resample it 
         for nth_img in xrange(cur_r.shape[0]):
             for kth_feature in xrange(cur_r.shape[1]):
@@ -232,16 +234,18 @@ class Gibbs(BaseSampler):
                 # resample vertical translation
                 old_v_trans = cur_r[nth_img, kth_feature, self.V_TRANS]
                 # set a new vertical transformation
-                cur_r[nth_img, kth_feature, self.V_TRANS] = np.random.randint(0, self.img_h)
+                cur_r[nth_img, kth_feature, self.V_TRANS] = rand_v[nth_img, kth_feature] #np.random.randint(0, self.img_h)
                 new_loglik = self._loglik_nth(cur_y, cur_z, cur_r, n = nth_img)
                 move_prob = 1 / (1 + np.exp(old_loglik - new_loglik))
                 if random.random() > move_prob: # revert changes if move_prob too small
                     cur_r[nth_img, kth_feature, self.V_TRANS] = old_v_trans
+                else:
+                    old_loglik = self._loglik_nth(cur_y, cur_z, cur_r, n=nth_img)
 
                 # resample horizontal translation
                 old_h_trans = cur_r[nth_img, kth_feature, self.H_TRANS]
                 # set a new vertical transformation
-                cur_r[nth_img, kth_feature, self.H_TRANS] = np.random.randint(0, self.img_w)
+                cur_r[nth_img, kth_feature, self.H_TRANS] = rand_h[nth_img, kth_feature]#np.random.randint(0, self.img_w)
                 new_loglik = self._loglik_nth(cur_y, cur_z, cur_r, n = nth_img)
                 move_prob = 1 / (1 + np.exp(old_loglik - new_loglik))
                 if random.random() > move_prob: # revert changes if move_prob too small
@@ -382,7 +386,7 @@ class Gibbs(BaseSampler):
             temp_cur_y = self._cl_infer_y(cur_y, cur_z, cur_r)
             temp_cur_z = self._cl_infer_z(temp_cur_y, cur_z, cur_r)
             self.gpu_time += time() - a_time
-            temp_cur_r = self._infer_r(temp_cur_y, temp_cur_z, cur_r).astype(np.int32)
+            temp_cur_r = self._cl_infer_r(temp_cur_y, temp_cur_z, cur_r).astype(np.int32)
             temp_cur_y, temp_cur_z, temp_cur_r = self._cl_infer_k_new(temp_cur_y, temp_cur_z, temp_cur_r)
 
             if self.record_best:
@@ -414,8 +418,8 @@ class Gibbs(BaseSampler):
         """Infer feature images
         """
         d_cur_y = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = cur_y.astype(np.int32))
-        d_cur_z = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = cur_z.astype(np.int32))
-        d_cur_r = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = cur_r.astype(np.int32))
+        d_cur_z = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = cur_z.astype(np.int32))
+        d_cur_r = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = cur_r.astype(np.int32))
         d_z_by_ry = cl.array.zeros(self.queue, (cur_z.shape[0], cur_y.shape[1]), np.int32)
         d_rand = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
                            hostbuf=np.random.random(size = cur_y.shape).astype(np.float32))
@@ -439,11 +443,11 @@ class Gibbs(BaseSampler):
     def _cl_infer_z(self, cur_y, cur_z, cur_r):
         """Infer feature ownership
         """
-        d_cur_y = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = cur_y.astype(np.int32))
+        d_cur_y = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = cur_y.astype(np.int32))
         d_cur_z = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = cur_z.astype(np.int32))
-        d_cur_r = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = cur_r.astype(np.int32))
+        d_cur_r = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = cur_r.astype(np.int32))
         d_z_by_ry = cl.array.zeros(self.queue, (cur_z.shape[0], cur_y.shape[1]), np.int32)
-        d_z_col_sum = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, 
+        d_z_col_sum = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
                                 hostbuf = cur_z.sum(axis = 0).astype(np.int32))
         d_rand = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
                            hostbuf=np.random.random(size = cur_z.shape).astype(np.float32))
@@ -500,6 +504,89 @@ class Gibbs(BaseSampler):
 
         return cur_y, cur_z, cur_r
 
+    def _cl_infer_r(self, cur_y, cur_z, cur_r):
+        """Infer transformations using opencl.
+        """
+        a_time = time()
+        d_cur_z = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = cur_z.astype(np.int32))
+        d_cur_y = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = cur_y.astype(np.int32))
+        d_cur_r = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = cur_r.astype(np.int32))
+        d_z_by_ry = cl.array.zeros(self.queue, (cur_z.shape[0], cur_y.shape[1]), np.int32)
+        
+        # calculate the z_by_ry_old under old transformations
+        d_z_by_ry_old = cl.array.zeros(self.queue, (cur_z.shape[0], cur_y.shape[1]), np.int32)
+        self.prg.compute_z_by_ry(self.queue, cur_z.shape, (1, cur_z.shape[1]),
+                                 d_cur_y, d_cur_z, d_cur_r, d_z_by_ry_old.data, 
+                                 cl.LocalMemory(cur_y.nbytes), cl.LocalMemory(cur_y.nbytes),
+                                 np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_y.shape[0]),
+                                 np.int32(self.img_w))
+
+        # calculate the z_by_ry_new under new randomly generated transformations
+        cur_r_new = np.copy(cur_r)
+        cur_r_new[:,:,self.V_TRANS] = np.random.randint(0, self.img_h, size = (cur_r_new.shape[0], cur_r_new.shape[1]))
+        d_cur_r_new = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = cur_r_new)
+        
+        d_z_by_ry_new = cl.array.zeros(self.queue, (cur_z.shape[0], cur_y.shape[1]), np.int32)
+        self.prg.compute_z_by_ry(self.queue, cur_z.shape, (1, cur_z.shape[1]),
+                                 d_cur_y, d_cur_z, d_cur_r_new, d_z_by_ry_new.data, 
+                                 cl.LocalMemory(cur_y.nbytes), cl.LocalMemory(cur_y.nbytes),
+                                 np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_y.shape[0]),
+                                 np.int32(self.img_w))
+
+        # reject or accept newly proposed transformations on a per-object basis
+        d_replace_r = cl.array.empty(self.queue, (self.N,), np.int32)
+        d_rand = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
+                           hostbuf=np.random.random(size = self.N).astype(np.float32))
+        
+        self.prg.sample_r(self.queue, (self.N, ), None,
+                          d_replace_r.data, d_z_by_ry_old.data, d_z_by_ry_new.data, self.d_obs, d_rand,
+                          np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_y.shape[0]),
+                          np.float32(self.lam), np.float32(self.epislon))
+
+        replace_r = d_replace_r.get()
+        self.gpu_time += time() - a_time
+        cur_r[np.where(replace_r == 1)] = cur_r_new[np.where(replace_r == 1)]
+
+        ########### Dealing with horizontal translations next ##########
+        a_time = time()
+        d_cur_r = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = cur_r.astype(np.int32))
+
+        # calculate the z_by_ry_old under old transformations
+        d_z_by_ry_old.fill(0)#cl.array.zeros(self.queue, (cur_z.shape[0], cur_y.shape[1]), np.int32)
+        self.prg.compute_z_by_ry(self.queue, cur_z.shape, (1, cur_z.shape[1]),
+                                 d_cur_y, d_cur_z, d_cur_r, d_z_by_ry_old.data, 
+                                 cl.LocalMemory(cur_y.nbytes), cl.LocalMemory(cur_y.nbytes),
+                                 np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_y.shape[0]),
+                                 np.int32(self.img_w))
+
+        # calculate the z_by_ry_new under new randomly generated transformations
+        cur_r_new = np.copy(cur_r)
+        cur_r_new[:,:,self.H_TRANS] = np.random.randint(0, self.img_w, size = (cur_r_new.shape[0], cur_r_new.shape[1]))
+        d_cur_r_new = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = cur_r_new)
+        
+        d_z_by_ry_new.fill(0)# = cl.array.zeros(self.queue, (cur_z.shape[0], cur_y.shape[1]), np.int32)
+        self.prg.compute_z_by_ry(self.queue, cur_z.shape, (1, cur_z.shape[1]),
+                                 d_cur_y, d_cur_z, d_cur_r_new, d_z_by_ry_new.data, 
+                                 cl.LocalMemory(cur_y.nbytes), cl.LocalMemory(cur_y.nbytes),
+                                 np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_y.shape[0]),
+                                 np.int32(self.img_w))
+
+        # reject or accept newly proposed transformations on a per-object basis
+        d_replace_r.fill(0)# = cl.array.empty(self.queue, (self.N,), np.int32)
+        d_rand = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
+                           hostbuf=np.random.random(size = self.N).astype(np.float32))
+        
+        self.prg.sample_r(self.queue, (self.N, ), None,
+                          d_replace_r.data, d_z_by_ry_old.data, d_z_by_ry_new.data, self.d_obs, d_rand,
+                          np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_y.shape[0]),
+                          np.float32(self.lam), np.float32(self.epislon))
+
+        replace_r = d_replace_r.get()
+        self.gpu_time += time() - a_time
+        cur_r[np.where(replace_r == 1)] = cur_r_new[np.where(replace_r == 1)]
+        return cur_r
+
+    
     def _logprob(self, sample):
         """Calculate the joint log probability of data and model given a sample.
         """

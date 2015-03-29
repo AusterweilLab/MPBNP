@@ -120,7 +120,7 @@ kernel void compute_z_by_ry(global int *cur_y, global int *cur_z, global int *cu
   // wait until all transformation is done
   barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE); 
 
-  /* at this point, for each image, a transformed y (new_y) has been generated */
+  /* at this point, for each object, a transformed y (new_y) has been generated */
   if (kth == 0) {
     for (int k = 0; k < K; k++) {
       for (int dth = 0; dth < D; dth++) {
@@ -248,7 +248,68 @@ kernel void sample_z(global int *cur_y,
   cur_z[nth * K + kth] = sample(2, labels, post, 0, rand[nth * K + kth]);
   //printf("after index: %d %f %f %d \n", nth * K + kth, post[0], post[1], cur_z[nth * K + kth]);
 }
-     
+
+kernel void sample_v_trans(global int *cur_y, global int *cur_z, global int *cur_r, global int *new_v_trans,
+			   global int *z_by_ry, local int *orig_y, local int *new_y,
+			   global int *obs, uint N, uint D, uint K, uint f_img_width) {
+
+  const uint V_TRANS = 0, H_TRANS = 1, NUM_TRANS = 2;
+  uint nth = get_global_id(0); // nth is the index of images
+  uint kth = get_global_id(1); // kth is the index of features
+  uint f_img_height = D / f_img_width;
+
+  // copy the original feature image to local memory
+  for (int dth = 0; dth < D; dth++) {
+    orig_y[kth * D + dth] = cur_y[kth * D + dth];
+  }
+  // wait until copying is done
+  barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE); 
+
+  // vertically translate the feature image using the OLD vertical translation distance
+  uint v_dist = cur_r[nth * (K * NUM_TRANS) + kth * NUM_TRANS + V_TRANS];
+  v_translate(orig_y, new_y, kth, f_img_height, f_img_width, v_dist, D);
+  
+  // copy new_y back to orig_y so that new_y can be used again
+  for (int dth = 0; dth < D; dth++) {
+    orig_y[kth * D + dth] = new_y[kth * D + dth];
+  }
+  barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE); // wait until copying is done
+
+  // horizontally translate the feature image
+  uint h_dist = cur_r[nth * (K * NUM_TRANS) + kth * NUM_TRANS + H_TRANS];
+  h_translate(orig_y, new_y, kth, f_img_height, f_img_width, h_dist, D);
+  barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE);  // wait until all transformations is done
+
+  /* at this point, for each object, a transformed Y (new_y) has been generated */
+  uint weight;
+  for (int dth = 0; dth < D; dth++) {
+    weight += new_y[kth * D + dth] * cur_z[nth * K + kth];
+  }
+}
+
+kernel void sample_r(global int *replace_r, global int *z_by_ry_old, global int *z_by_ry_new,
+		     global int *obs, global float *rand,
+		     uint N, uint D, uint K,
+		     float lambda, float epislon) {
+
+  uint nth = get_global_id(0);
+  float loglik_old = 0;
+  float loglik_new = 0;
+  for (int dth = 0; dth < D; dth++) {
+    if (obs[nth * D + dth] == 1) {
+      loglik_old += log(1 - pow(1 - lambda, z_by_ry_old[nth * D + dth]) * (1 - epislon));
+      loglik_new += log(1 - pow(1 - lambda, z_by_ry_new[nth * D + dth]) * (1 - epislon));
+    } else {
+      loglik_old += log(1 - lambda) * z_by_ry_old[nth * D + dth] + log(1 - epislon);
+      loglik_new += log(1 - lambda) * z_by_ry_new[nth * D + dth] + log(1 - epislon);
+    }
+  }
+  float move_prob = 1 / (1 + exp(loglik_old - loglik_new));
+  //printf("%f %f\n", loglik_old, loglik_new);
+  replace_r[nth] = move_prob > rand[nth];
+}
+
+// deprecated
 kernel void logprob_z_data(global int *cur_z,
 			   global int *z_by_ry,
 			   global int *obs,
