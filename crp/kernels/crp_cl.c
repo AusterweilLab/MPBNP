@@ -89,19 +89,20 @@ __kernel void normal_1d_logpost(global uint *labels, global float *data, global 
   float k_n, mu_n;
   float alpha_n, beta_n;
   float Lambda, sigma;
-  float new_size = n[c];
-
+  float new_size = n[c], new_mu = mu[c];
+  float logpost_temp;
+  
   k_n = gaussian_k0 + new_size;
-  mu_n = (gaussian_k0 * gaussian_mu0 + new_size * mu[c]) / k_n;
+  mu_n = (gaussian_k0 * gaussian_mu0 + new_size * new_mu) / k_n;
   alpha_n = gamma_alpha0 + new_size / 2.0f;
-  beta_n = gamma_beta0 + 0.5f * ss[c] + gaussian_k0 * new_size * pow((mu[c] - gaussian_mu0), 2.0f) / (2.0f * k_n);
+  beta_n = gamma_beta0 + 0.5f * ss[c] + gaussian_k0 * new_size * pow((new_mu - gaussian_mu0), 2.0f) / (2.0f * k_n);
 
   Lambda = alpha_n * k_n / (beta_n * (k_n + 1.0f));
   sigma = pow(1.0f/Lambda, 0.5f);
-  logpost[i * cluster_num + c] = t_logpdf(data[i], 2.0f * alpha_n, mu_n, sigma);
-  logpost[i * cluster_num + c] += (new_size > 0) ? 
+  logpost_temp = t_logpdf(data[i], 2.0f * alpha_n, mu_n, sigma);
+  logpost_temp += (new_size > 0) ? 
     log(new_size/(alpha + data_size)) : log(alpha/(alpha + data_size));
-  barrier(CLK_LOCAL_MEM_FENCE|CLK_GLOBAL_MEM_FENCE);
+  logpost[i * cluster_num + c] = logpost_temp;
 }
 
 __kernel void normal_1d_logpost_loopy(global uint *labels, global float *data, global uint *uniq_label, 
