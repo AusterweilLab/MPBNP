@@ -6,7 +6,7 @@ import sys, os.path, itertools, cPickle
 pkg_dir = os.path.dirname(os.path.realpath(__file__)) + '/../../'
 sys.path.append(pkg_dir)
 
-import pyopencl.array
+from fractions import gcd
 from scipy.stats import poisson
 from MPBNP import *
 from MPBNP import BaseSampler, BasePredictor
@@ -25,6 +25,14 @@ class Gibbs(BaseSampler):
             program_str = open(pkg_dir + 'MPBNP/ibp/kernels/ibp_noisyor_cl.c', 'r').read()
             self.prg = cl.Program(self.ctx, program_str).build()
 
+            self.p_mul_logprob_z_data = cl.Kernel(self.prg, 'logprob_z_data').\
+                        get_work_group_info(cl.kernel_work_group_info.PREFERRED_WORK_GROUP_SIZE_MULTIPLE, self.device)
+            self.p_mul_sample_y = cl.Kernel(self.prg, 'sample_y').\
+                        get_work_group_info(cl.kernel_work_group_info.PREFERRED_WORK_GROUP_SIZE_MULTIPLE, self.device)
+            self.p_mul_sample_z = cl.Kernel(self.prg, 'sample_z').\
+                        get_work_group_info(cl.kernel_work_group_info.PREFERRED_WORK_GROUP_SIZE_MULTIPLE, self.device)
+
+            
         self.alpha = alpha # tendency to generate new features
         self.k = init_k    # initial number of features
         self.theta = theta # prior probability that a pixel is on in a feature image
@@ -45,7 +53,7 @@ class Gibbs(BaseSampler):
             self.d_obs = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf=self.obs.astype(np.int32))
 
         self.d = len(self.obs[0])
-        self.alpha = self.N
+        self.alpha = self.N / self.N
         return
 
     def direct_read_obs(self, obs):
@@ -317,14 +325,17 @@ class Gibbs(BaseSampler):
         """Infer feature images
         """
         d_cur_y = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = cur_y.astype(np.int32))
-        d_cur_z = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = cur_z.astype(np.int32))
+        d_cur_z = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = cur_z.astype(np.int32))
         d_z_by_y = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
                              hostbuf = np.dot(cur_z, cur_y).astype(np.int32))
         d_rand = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
                            hostbuf=np.random.random(size = cur_y.shape).astype(np.float32))
 
+        wgx = gcd(cur_y.shape[0], self.p_mul_sample_y)
+        wgy = gcd(cur_y.shape[1], self.p_mul_sample_y)
+        
         # calculate the prior probability that a pixel is on
-        self.prg.sample_y(self.queue, cur_y.shape, None,
+        self.prg.sample_y(self.queue, cur_y.shape, (wgx, wgy),
                           d_cur_y, d_cur_z, d_z_by_y, self.d_obs, d_rand, 
                           np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_y.shape[0]),
                           np.float32(self.lam), np.float32(self.epislon), np.float32(self.theta))
@@ -335,7 +346,7 @@ class Gibbs(BaseSampler):
     def _cl_infer_z(self, cur_y, cur_z):
         """Infer feature ownership
         """
-        d_cur_y = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = cur_y.astype(np.int32))
+        d_cur_y = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = cur_y.astype(np.int32))
         d_cur_z = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = cur_z.astype(np.int32))
         d_z_by_y = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
                              hostbuf = np.dot(cur_z, cur_y).astype(np.int32))
@@ -344,8 +355,11 @@ class Gibbs(BaseSampler):
         d_rand = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
                            hostbuf=np.random.random(size = cur_z.shape).astype(np.float32))
 
+        wgx = gcd(cur_z.shape[0], self.p_mul_sample_z)
+        wgy = gcd(cur_z.shape[1], self.p_mul_sample_z)
+        
         # calculate the prior probability that a pixel is on
-        self.prg.sample_z(self.queue, cur_z.shape, None,
+        self.prg.sample_z(self.queue, cur_z.shape, (wgx, wgy),
                           d_cur_y, d_cur_z, d_z_by_y, d_z_col_sum, self.d_obs, d_rand, 
                           np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_z.shape[1]),
                           np.float32(self.lam), np.float32(self.epislon), np.float32(self.theta))
@@ -393,12 +407,14 @@ class Gibbs(BaseSampler):
     
         if self.cl_mode:
             a_time = time()
-            d_cur_z = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = cur_z.astype(np.int32))
-            d_cur_y = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = cur_y.astype(np.int32))
-            d_logprob = cl.array.empty(self.queue, (cur_z.shape[0],), np.float32)
-            #d_novel_f = cl.array.empty(self.queue, cur_z.shape, np.int32)
+            d_cur_z = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = cur_z.astype(np.int32))
+            d_cur_y = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = cur_y.astype(np.int32))
+            d_logprob = cl.array.empty(self.queue, (cur_z.shape[0],), np.float32, allocator=self.mem_pool)
 
-            self.prg.logprob_z_data(self.queue, (cur_z.shape[0],), None, 
+            if cur_z.shape[0] % self.p_mul_logprob_z_data == 0: wg = (self.p_mul_logprob_z_data,)
+            else: wg = None
+            
+            self.prg.logprob_z_data(self.queue, (cur_z.shape[0],), wg,
                                     d_cur_z, d_cur_y, self.d_obs, d_logprob.data, #d_novel_f.data,
                                     np.int32(self.N), np.int32(cur_y.shape[1]), np.int32(cur_z.shape[1]), 
                                     np.float32(self.alpha), np.float32(self.lam), np.float32(self.epislon))

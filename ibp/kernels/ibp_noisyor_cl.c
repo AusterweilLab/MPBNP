@@ -78,19 +78,21 @@ kernel void sample_y(global int *cur_y,
   float on_loglik_temp = log(theta); 
   float off_loglik_temp = log(1 - theta);
   
+  int z_by_y_nth;
   // extremely hackish way to calculate the loglikelihood
   for (int n = 0; n < N; n++) {
+    z_by_y_nth = z_by_y[n * D + dth];
     // if the nth object has the kth feature
     if (cur_z[n * K + kth] == 1) {
       // if the observed pixel at dth is on
       if (obs[n * D + dth] == 1) {
 	// if the feature image previously has this pixel on
 	if (cur_y[kth * D + dth] == 1) {
-	  on_loglik_temp += log(1 - pow(1 - lambda, z_by_y[n * D + dth]) * (1 - epislon));
-	  off_loglik_temp += log(1 - pow(1 - lambda, z_by_y[n * D + dth] - 1) * (1 - epislon));
+	  on_loglik_temp += log(1 - pow(1 - lambda, z_by_y_nth) * (1 - epislon));
+	  off_loglik_temp += log(1 - pow(1 - lambda, z_by_y_nth - 1) * (1 - epislon));
 	} else {
-	  on_loglik_temp += log(1 - pow(1 - lambda, z_by_y[n * D + dth] + 1) * (1 - epislon));
-	  off_loglik_temp += log(1 - pow(1 - lambda, z_by_y[n * D + dth]) * (1 - epislon));
+	  on_loglik_temp += log(1 - pow(1 - lambda, z_by_y_nth + 1) * (1 - epislon));
+	  off_loglik_temp += log(1 - pow(1 - lambda, z_by_y_nth) * (1 - epislon));
 	}
       } else {
 	on_loglik_temp += log(1 - lambda);
@@ -120,22 +122,22 @@ kernel void sample_z(global int *cur_y,
   // calculate the prior probability of each cell is 1
   float on_prob_temp = (z_col_sum[kth] - cur_z[nth * K + kth]) / (float)N; 
   float off_prob_temp = 1 - (z_col_sum[kth] - cur_z[nth * K + kth]) / (float)N;
-  
-  int d;
-  
+
+  int z_by_y_dth;
   // extremely hackish way to calculate the probelihood
-  for (d = 0; d < D; d++) {
+  for (int d = 0; d < D; d++) {
+    z_by_y_dth = z_by_y[nth * D + d];
     // if the kth feature can turn on a pixel at d
     if (cur_y[kth * D + d] == 1) {
       // if the observed pixel at dth is on
       if (obs[nth * D + d] == 1) {
 	// if the nth object previously has the kth feature
 	if (cur_z[nth * K + kth] == 1) {
-	  on_prob_temp *= 1 - pow(1 - lambda, z_by_y[nth * D + d]) * (1 - epislon);
-	  off_prob_temp *= 1 - pow(1 - lambda, z_by_y[nth * D + d] - 1) * (1 - epislon);
+	  on_prob_temp *= 1 - pow(1 - lambda, z_by_y_dth) * (1 - epislon);
+	  off_prob_temp *= 1 - pow(1 - lambda, z_by_y_dth - 1) * (1 - epislon);
 	} else {
-	  on_prob_temp *= 1 - pow(1 - lambda, z_by_y[nth * D + d] + 1) * (1 - epislon);
-	  off_prob_temp *= 1 - pow(1 - lambda, z_by_y[nth * D + d]) * (1 - epislon);
+	  on_prob_temp *= 1 - pow(1 - lambda, z_by_y_dth + 1) * (1 - epislon);
+	  off_prob_temp *= 1 - pow(1 - lambda, z_by_y_dth) * (1 - epislon);
 	}
       } else {
 	on_prob_temp *= 1 - lambda;
@@ -182,12 +184,10 @@ kernel void logprob_z_data(global int *cur_z,
 	logprob_temp += log(1 - m / (nth + 1.0f));
       }
     } else { // if this is a novel feature
-      if (cur_z[nth * K + k] == 1) novel_count += 1;
+      novel_count += cur_z[nth * K + k] == 1;
     }
   }
-  if (novel_count > 0) {
-    logprob_temp += pois_logpmf(novel_count, alpha / (nth+1.0f));
-  }
+  logprob_temp += (novel_count > 0) * pois_logpmf(novel_count, alpha / (nth+1.0f));
 
   /* calculate the log-likelihood of the nth row of data
      given the corresponding row in Z and Y
