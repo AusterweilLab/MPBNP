@@ -168,23 +168,25 @@ kernel void logprob_z_data(global int *cur_z,
   uint novel_count = 0;
   float logprob_temp = 0;
 
+  uint cur_z_nth;
   /* calculate the log probability of the nth row of Z 
      i.e., the prior probability of having the features
      of the nth object.
    */
   for (int k = 0; k < K; k++) {
     m = 0;
+    cur_z_nth = cur_z[nth * K + k];
     for (int n = 0; n < nth; n++) {
       m += cur_z[n * K + k];
     }
     if (m > 0) { // if other objects have had this feature
-      if (cur_z[nth * K + k] == 1) {
+      if (cur_z_nth == 1) {
 	logprob_temp += log(m / (nth + 1.0f));
       } else {
 	logprob_temp += log(1 - m / (nth + 1.0f));
       }
     } else { // if this is a novel feature
-      novel_count += cur_z[nth * K + k] == 1;
+      novel_count += cur_z_nth == 1;
     }
   }
   logprob_temp += (novel_count > 0) * pois_logpmf(novel_count, alpha / (nth+1.0f));
