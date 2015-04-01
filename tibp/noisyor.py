@@ -600,7 +600,8 @@ class Gibbs(BaseSampler):
             # calculate the log prior of Z
             d_logprior_z = cl.array.empty(self.queue, cur_z.shape, np.float32, allocator=self.mem_pool)
             self.prg.logprior_z(self.queue, cur_z.shape, (1, cur_z.shape[1]), 
-                                d_cur_z.data, d_logprior_z.data, cl.LocalMemory(cur_z[0].nbytes),
+                                d_cur_z.data, d_logprior_z.data, 
+                                cl.LocalMemory(cur_z[0].nbytes), cl.LocalMemory(cur_z.nbytes),
                                 np.int32(self.N), np.int32(cur_y.shape[1]), np.int32(cur_z.shape[1]), 
                                 np.float32(self.alpha))
 

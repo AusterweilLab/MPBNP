@@ -360,9 +360,8 @@ kernel void logprob_z_data(global int *cur_z,
   logprob[nth] = logprob_temp;
 }
 
-kernel void logprior_z(global int *cur_z,
-		       global float *logprob,
-		       local uint *novel_feat,
+kernel void logprior_z(global uint *cur_z, global float *logprob,
+		       local uint *novel_feat, local uint *local_cur_z,
 		       uint N, uint D, uint K,
 		       float alpha) {
   
@@ -371,23 +370,31 @@ kernel void logprior_z(global int *cur_z,
   uint m = 0;
   float logprob_temp = 0;
   novel_feat[kth] = 0;
+
+  if (get_local_id(0) == 0 & get_local_id(1) == 0) {
+    for (int n = 0; n <= nth; n++) {
+      local_cur_z[n * K + kth] = cur_z[n * K + kth];
+    }
+  }
+  // wait until copying is done
+  barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE);
   
   /* calculate the log probability of the nth row of Z 
      i.e., the prior probability of having the features
      of the nth object.
    */
   for (int n = 0; n < nth; n++) {
-    m += cur_z[n * K + kth];
+    m += local_cur_z[n * K + kth];
   }
   if (m > 0) { // if other objects have had this feature
-    if (cur_z[nth * K + kth] == 1) {
+    if (local_cur_z[nth * K + kth] == 1) {
       logprob_temp += log(m / (nth + 1.0f));
     }
     else {
       logprob_temp += log(1 - m / (nth + 1.0f));
     }
   } else { // if this is a novel feature
-    if (cur_z[nth * K + kth] == 1) novel_feat[kth] = 1;
+    novel_feat[kth] = local_cur_z[nth * K + kth] == 1;
   }
 
   // wait until tallying is done
