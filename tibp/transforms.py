@@ -3,6 +3,7 @@
 
 from __future__ import print_function, division
 import numpy as np
+from scipy import ndimage
 
 def v_translate(f_img, f_img_width, distance):
     """Translate a feature image vertically by distance (+ 
@@ -61,20 +62,27 @@ def h_trans(f_img, f_img_width, distance):
     return t
 
 def scale(f_img, f_img_width, percent):
-    """Scale a feature image by holding the top left corner
-    of the image constant.
+    """Scale a feature image by holding the top-left corner constant
     """
-    pass
+    if percent == 1: return f_img
+    f_img_height = int(f_img.shape[0] / f_img_width)
+    f_img_mat = f_img.reshape((f_img_height, f_img_width))
+
+    f_img_mat_new = ndimage.interpolation.zoom(f_img_mat, zoom = percent)
+    if f_img_mat_new.shape[0] < f_img_mat.shape[0]:
+        f_img_mat_new = np.pad(f_img_mat_new, 
+                               ((0, f_img_mat.shape[0] - f_img_mat_new.shape[0]), 
+                                (0, f_img_mat.shape[1] - f_img_mat_new.shape[1])), 
+                               mode="constant")
+    elif f_img_mat_new.shape[0] > f_img_mat.shape[0]:
+        f_img_mat_new = f_img_mat_new[:f_img_mat.shape[0], :f_img_mat.shape[1]]
+        
+    return f_img_mat_new.reshape(f_img.shape)
     
 if __name__ == "__main__":
     
-    a = np.random.randint(0,20,60000)
-    print(a)
+    a = np.random.randint(0,2,25)
     from time import time
     a_time = time()
-    h_translate(a, 30, 15)
+    print(scale(a, 5, 1.2))
     print(time() - a_time)
-    a_time = time()
-    h_trans(a, 30, 15)
-    print(time() - a_time)
-    print(np.array_equal(h_translate(a, 30, 15), h_trans(a, 30, 15)))
