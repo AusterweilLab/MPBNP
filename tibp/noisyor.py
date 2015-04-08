@@ -17,7 +17,8 @@ class Gibbs(BaseSampler):
 
     V_TRANS = 0
     H_TRANS = 1
-    NUM_TRANS = 2
+    SCALE_PERCENT = 2
+    NUM_TRANS = 3
     
     def __init__(self, cl_mode = True, cl_device = None, record_best = True,
                  alpha = None, lam = 0.98, theta = 0.2, epislon = 0.02, init_k = 1):
@@ -85,7 +86,10 @@ class Gibbs(BaseSampler):
             assert(init_z.shape == (len(self.obs), self.k))
 
         if init_r is None:
-            init_r = np.random.randint(0, 2, (self.N, self.k, self.NUM_TRANS))#np.zeros((self.N, self.k, self.NUM_TRANS))
+            init_r = np.empty(shape = (self.N, self.k, self.NUM_TRANS))
+            init_r[:,:,self.V_TRANS] = np.random.randint(0, 2, (self.N, self.k))
+            init_r[:,:,self.H_TRANS] = np.random.randint(0, 2, (self.N, self.k))
+            init_r[:,:,self.SCALE_PERCENT] = 100
         else:
             assert(init_r is None)
 
@@ -132,6 +136,7 @@ class Gibbs(BaseSampler):
                 hyper_pram = [self.alpha, self.lam, self.theta, self.epislon]
                 print(final_z.shape[1], *(hyper_pram + list(final_y.flatten())), file = output_file, sep=',')
                 print(final_z.shape[1], *(hyper_pram + list(final_z.flatten())), file = output_file, sep=',')
+                print(final_r)
             else:
                 cPickle.dump(self.samples, open(output_file, 'w'))
 
@@ -226,6 +231,7 @@ class Gibbs(BaseSampler):
         """
         rand_v = np.random.randint(0, self.img_h, size=(cur_z.shape[0], cur_z.shape[1]))
         rand_h = np.random.randint(0, self.img_w, size=(cur_z.shape[0], cur_z.shape[1]))
+        rand_scale = np.random.poisson(cur_r[:,:,self.SCALE_PERCENT])
         # iterate over each transformation and resample it 
         for nth_img in xrange(cur_r.shape[0]):
             for kth_feature in xrange(cur_r.shape[1]):
@@ -240,7 +246,7 @@ class Gibbs(BaseSampler):
                 if random.random() > move_prob: # revert changes if move_prob too small
                     cur_r[nth_img, kth_feature, self.V_TRANS] = old_v_trans
                 else:
-                    old_loglik = self._loglik_nth(cur_y, cur_z, cur_r, n=nth_img)
+                    old_loglik = new_loglik
 
                 # resample horizontal translation
                 old_h_trans = cur_r[nth_img, kth_feature, self.H_TRANS]
@@ -250,6 +256,17 @@ class Gibbs(BaseSampler):
                 move_prob = 1 / (1 + np.exp(old_loglik - new_loglik))
                 if random.random() > move_prob: # revert changes if move_prob too small
                     cur_r[nth_img, kth_feature, self.H_TRANS] = old_h_trans
+                else:
+                    old_loglik = new_loglik
+
+                # resample scale percentage
+                old_scale = cur_r[nth_img, kth_feature, self.SCALE_PERCENT]
+                # set a new vertical transformation
+                cur_r[nth_img, kth_feature, self.SCALE_PERCENT] = rand_scale[nth_img, kth_feature]#np.random.randint(0, self.img_w)
+                new_loglik = self._loglik_nth(cur_y, cur_z, cur_r, n = nth_img)
+                move_prob = 1 / (1 + np.exp(old_loglik - new_loglik))
+                if random.random() > move_prob: # revert changes if move_prob too small
+                    cur_r[nth_img, kth_feature, self.SCALE_PERCENT] = old_scale
                     
         return cur_r
     
@@ -326,6 +343,7 @@ class Gibbs(BaseSampler):
             for r_feat in cur_r[nth]: # r_feat refers to the transforms applied one feature
                 nth_y[kth_feat] = v_translate(nth_y[kth_feat], self.img_w, r_feat[self.V_TRANS])
                 nth_y[kth_feat] = h_translate(nth_y[kth_feat], self.img_w, r_feat[self.H_TRANS])
+                nth_y[kth_feat] = scale(nth_y[kth_feat], self.img_w, r_feat[self.SCALE_PERCENT])
                 kth_feat += 1
                 
             not_on_p[i] = np.power(1. - self.lam, np.dot(cur_z[nth], nth_y)) * (1. - self.epislon)
@@ -348,6 +366,7 @@ class Gibbs(BaseSampler):
             for r_feat in cur_r[nth]: # r_feat refers to the transforms applied one feature
                 nth_y[kth_feat] = v_translate(nth_y[kth_feat], self.img_w, r_feat[self.V_TRANS])
                 nth_y[kth_feat] = h_translate(nth_y[kth_feat], self.img_w, r_feat[self.H_TRANS])
+                nth_y[kth_feat] = scale(nth_y[kth_feat], self.img_w, r_feat[self.SCALE_PERCENT])
                 kth_feat += 1
                 
             not_on_p[nth] = np.power(1. - self.lam, np.dot(cur_z[nth], nth_y)) * (1. - self.epislon)

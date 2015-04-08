@@ -13,11 +13,11 @@ def v_translate(f_img, f_img_width, distance):
     f_img_height = int(f_img.shape[0] / f_img_width)
     f_img_mat = f_img.reshape((f_img_height, f_img_width))
     if distance > 0:
-        shift = distance % f_img_height
+        shift = int(distance % f_img_height)
         t = np.vstack((f_img_mat[f_img_height-shift:],
                        f_img_mat[:f_img_height-shift])).reshape(f_img.shape)
     if distance < 0:
-        shift = abs(distance) % f_img_height
+        shift = int(abs(distance) % f_img_height)
         t = np.vstack((f_img_mat[shift:], 
                        f_img_mat[:shift])).reshape(f_img.shape)
     return t
@@ -41,11 +41,11 @@ def h_translate(f_img, f_img_width, distance):
     f_img_height = int(f_img.shape[0] / f_img_width)
     f_img_mat = f_img.reshape((f_img_height, f_img_width))
     if distance > 0:
-        shift = distance % f_img_width
+        shift = int(distance % f_img_width)
         t = np.hstack((f_img_mat[:,f_img_width-shift:],
                        f_img_mat[:,:f_img_width-shift])).reshape(f_img.shape)
     if distance < 0:
-        shift = abs(distance) % f_img_height
+        shift = int(abs(distance) % f_img_height)
         t = np.hstack((f_img_mat[:,shift:], 
                        f_img_mat[:,:shift])).reshape(f_img.shape)
     return t
@@ -64,24 +64,25 @@ def h_trans(f_img, f_img_width, distance):
 def scale(f_img, f_img_width, percent):
     """Scale a feature image by holding the top-left corner constant
     """
-    if percent == 1: return f_img
+    if percent == 100: return f_img
+    percent = percent / 100
     f_img_height = int(f_img.shape[0] / f_img_width)
     f_img_mat = f_img.reshape((f_img_height, f_img_width))
 
     f_img_mat_new = ndimage.interpolation.zoom(f_img_mat, zoom = percent)
-    if f_img_mat_new.shape[0] < f_img_mat.shape[0]:
+    if f_img_mat_new.shape[0] < f_img_mat.shape[0] or f_img_mat_new.shape[1] < f_img_mat.shape[1]:
         f_img_mat_new = np.pad(f_img_mat_new, 
                                ((0, f_img_mat.shape[0] - f_img_mat_new.shape[0]), 
                                 (0, f_img_mat.shape[1] - f_img_mat_new.shape[1])), 
                                mode="constant")
-    elif f_img_mat_new.shape[0] > f_img_mat.shape[0]:
+    elif f_img_mat_new.shape[0] > f_img_mat.shape[0] or f_img_mat_new.shape[1] > f_img_mat.shape[1]:
         f_img_mat_new = f_img_mat_new[:f_img_mat.shape[0], :f_img_mat.shape[1]]
         
     return f_img_mat_new.reshape(f_img.shape)
     
 if __name__ == "__main__":
     
-    a = np.random.randint(0,2,25)
+    a = np.random.randint(0,2,10)
     from time import time
     a_time = time()
     print(scale(a, 5, 1.2))
