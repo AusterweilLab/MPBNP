@@ -3,7 +3,11 @@
 
 from __future__ import print_function, division
 import numpy as np
+import sys
 from scipy import ndimage
+
+import warnings
+#warnings.filterwarnings('error')
 
 def v_translate(f_img, f_img_width, distance):
     """Translate a feature image vertically by distance (+ 
@@ -61,15 +65,21 @@ def h_trans(f_img, f_img_width, distance):
             t[h * f_img_width + (w + distance) % f_img_width] = f_img[h * f_img_width + w]
     return t
 
-def scale(f_img, f_img_width, percent):
-    """Scale a feature image by holding the top-left corner constant
+def scale(f_img, f_img_width, pixel):
+    """Scale a feature image by pixel from right and bottom
+    while holding the top-left corner constant
     """
-    if percent == 100: return f_img
-    percent = percent / 100
+    if pixel == 0: return f_img
     f_img_height = int(f_img.shape[0] / f_img_width)
+    if pixel > min(f_img_height, f_img_width) - 2:
+        warnings.warn("Scale magnitude is greater than allowed maximum. No scaling performed.")
+        return f_img
+    
+    percent = (f_img_height - pixel) * (f_img_width - pixel) / f_img_width / f_img_height
     f_img_mat = f_img.reshape((f_img_height, f_img_width))
 
     f_img_mat_new = ndimage.interpolation.zoom(f_img_mat, zoom = percent)
+
     if f_img_mat_new.shape[0] < f_img_mat.shape[0] or f_img_mat_new.shape[1] < f_img_mat.shape[1]:
         f_img_mat_new = np.pad(f_img_mat_new, 
                                ((0, f_img_mat.shape[0] - f_img_mat_new.shape[0]), 
