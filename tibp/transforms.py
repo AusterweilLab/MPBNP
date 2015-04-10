@@ -75,7 +75,7 @@ def scale(f_img, f_img_width, pixel):
         warnings.warn("Scale magnitude is greater than allowed maximum. No scaling performed.")
         return f_img
     
-    percent = (f_img_height - pixel) * (f_img_width - pixel) / f_img_width / f_img_height
+    percent = min(f_img_height - pixel, f_img_width - pixel) / min(f_img_width, f_img_height)
     f_img_mat = f_img.reshape((f_img_height, f_img_width))
 
     f_img_mat_new = ndimage.interpolation.zoom(f_img_mat, zoom = percent)
