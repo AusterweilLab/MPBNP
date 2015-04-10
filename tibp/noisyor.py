@@ -35,6 +35,7 @@ class Gibbs(BaseSampler):
         self.theta = theta # prior probability that a pixel is on in a feature image
         self.lam = lam # effecacy of a feature
         self.epislon = epislon # probability that a pixel is on by change in an actual image
+        self.phi = 0.6 # prior probability that non transformation is applied
         self.samples = {'z': [], 'y': [], 'r': []} # sample storage, to be pickled
 
     def read_csv(self, filepath, header=True):
@@ -423,7 +424,6 @@ class Gibbs(BaseSampler):
 
         if output_file is not None:
             if self.record_best:
-                # print out the Y matrix
                 final_y, final_z, final_r = self.best_sample[0]
                 hyper_pram = [self.alpha, self.lam, self.theta, self.epislon]
                 print(final_z.shape[1], *(hyper_pram + list(final_y.flatten())), file = output_file, sep=',')
@@ -664,10 +664,16 @@ class Gibbs(BaseSampler):
                         if cur_z[n,k] == 1: num_novel += 1
                 if num_novel > 0:
                     log_prior += poisson.logpmf(num_novel, self.alpha / (n+1.0))
+
             # calculate the prior probability of Y
             num_on = (cur_y == 1).sum()
             num_off = (cur_y == 0).sum()
             log_prior += num_on * np.log(self.theta) + num_off * np.log(1 - self.theta)
+
+            # calculate the prior probability of R
+            # we implement a slight bias towards no transformation
+            log_prior += (cur_r > 0).sum() * np.log(1 - self.phi) + (cur_r == 0).sum() * np.log(self.phi)
+
             # calculate the logliklihood
             log_lik = self._loglik(cur_y = cur_y, cur_z = cur_z, cur_r = cur_r)
         return log_prior + log_lik
