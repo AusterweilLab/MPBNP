@@ -89,11 +89,43 @@ def scale(f_img, f_img_width, pixel):
         f_img_mat_new = f_img_mat_new[:f_img_mat.shape[0], :f_img_mat.shape[1]]
         
     return f_img_mat_new.reshape(f_img.shape)
+
+def scale_manual(f_img, f_img_width, x_pixel, y_pixel):
+    """Scale a feature image by x_pixel on the x axis, and
+    y_pixel on the y axis, using nearest neighbor. negative
+    pixel values means shrink. positive enlarge.
+    """
+    if x_pixel == 0 and y_pixel == 0: return f_img
+
+    f_img_height = int(f_img.shape[0] / f_img_width)
+    x_factor = (f_img_width + x_pixel) / f_img_width
+    y_factor = (f_img_height + y_pixel) / f_img_height
+
+    # construct the original matrix
+    f_img_mat = f_img.reshape((f_img_height, f_img_width))
+    # compute the new height and width of scaled matrix
+    new_height = int(np.ceil(f_img_height * y_factor))
+    new_width = int(np.ceil(f_img_width * x_factor))
+    # set up the new matrix in the same size as the old, because we assume overflow and fill by zero
+    f_img_mat_new = np.zeros(f_img_mat.shape, dtype = f_img_mat.dtype)
+
+    for i in xrange(f_img_height):
+        for j in xrange(f_img_width): 
+            ii = int(np.round( i / new_height * f_img_height))
+            jj = int(np.round( j / new_width * f_img_width))
+
+            try: f_img_mat_new[i,j] = f_img_mat[ii,jj]
+            except: pass
+
+    #print(f_img_mat)
+    #print(f_img_mat_new)
+    
+    return f_img_mat_new.reshape(f_img.shape)
     
 if __name__ == "__main__":
     
-    a = np.random.randint(0,2,10)
+    a = np.random.randint(0,2,25)
     from time import time
     a_time = time()
-    print(scale(a, 5, 1.2))
+    print(scale_manual(a, 5, 0.8, 0.8))
     print(time() - a_time)

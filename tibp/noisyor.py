@@ -15,10 +15,11 @@ np.set_printoptions(suppress=True)
 
 class Gibbs(BaseSampler):
 
-    V_TRANS = 0
-    H_TRANS = 1
-    SCALE_PIXEL = 2
-    NUM_TRANS = 3
+    SCALE_V_PIXEL = 0
+    SCALE_H_PIXEL = 1
+    V_TRANS = 2
+    H_TRANS = 3
+    NUM_TRANS = 4
     
     def __init__(self, cl_mode = True, cl_device = None, record_best = True,
                  alpha = None, lam = 0.98, theta = 0.2, epislon = 0.02, init_k = 1):
@@ -88,9 +89,10 @@ class Gibbs(BaseSampler):
 
         if init_r is None:
             init_r = np.empty(shape = (self.N, self.k, self.NUM_TRANS))
+            init_r[:,:,self.SCALE_V_PIXEL] = 0
+            init_r[:,:,self.SCALE_H_PIXEL] = 0
             init_r[:,:,self.V_TRANS] = np.random.randint(0, 2, (self.N, self.k))
             init_r[:,:,self.H_TRANS] = np.random.randint(0, 2, (self.N, self.k))
-            init_r[:,:,self.SCALE_PIXEL] = 0
         else:
             assert(init_r is None)
 
@@ -232,7 +234,8 @@ class Gibbs(BaseSampler):
         """
         rand_v = np.random.randint(0, self.img_h, size=(cur_z.shape[0], cur_z.shape[1]))
         rand_h = np.random.randint(0, self.img_w, size=(cur_z.shape[0], cur_z.shape[1]))
-        rand_scale = np.random.randint(0, min(self.img_h, self.img_w) - 1, size=(cur_z.shape[0], cur_z.shape[1]))
+        rand_v_scale = np.random.randint(-self.img_h+1, self.img_h, size=(cur_z.shape[0], cur_z.shape[1]))
+        rand_h_scale = np.random.randint(-self.img_w+1, self.img_w, size=(cur_z.shape[0], cur_z.shape[1]))
         # iterate over each transformation and resample it 
         for nth_img in xrange(cur_r.shape[0]):
             for kth_feature in xrange(cur_r.shape[1]):
@@ -252,7 +255,7 @@ class Gibbs(BaseSampler):
                 # resample horizontal translation
                 old_h_trans = cur_r[nth_img, kth_feature, self.H_TRANS]
                 # set a new vertical transformation
-                cur_r[nth_img, kth_feature, self.H_TRANS] = rand_h[nth_img, kth_feature]#np.random.randint(0, self.img_w)
+                cur_r[nth_img, kth_feature, self.H_TRANS] = rand_h[nth_img, kth_feature]
                 new_loglik = self._loglik_nth(cur_y, cur_z, cur_r, n = nth_img)
                 move_prob = 1 / (1 + np.exp(old_loglik - new_loglik))
                 if random.random() > move_prob: # revert changes if move_prob too small
@@ -261,13 +264,24 @@ class Gibbs(BaseSampler):
                     old_loglik = new_loglik
 
                 # resample scale percentage
-                old_scale = cur_r[nth_img, kth_feature, self.SCALE_PIXEL]
-                # set a new vertical transformation
-                cur_r[nth_img, kth_feature, self.SCALE_PIXEL] = rand_scale[nth_img, kth_feature]#np.random.randint(0, self.img_w)
+                old_v_scale = cur_r[nth_img, kth_feature, self.SCALE_V_PIXEL]
+                # set a new vertical scale
+                cur_r[nth_img, kth_feature, self.SCALE_V_PIXEL] = rand_v_scale[nth_img, kth_feature]
                 new_loglik = self._loglik_nth(cur_y, cur_z, cur_r, n = nth_img)
                 move_prob = 1 / (1 + np.exp(old_loglik - new_loglik))
                 if random.random() > move_prob: # revert changes if move_prob too small
-                    cur_r[nth_img, kth_feature, self.SCALE_PIXEL] = old_scale
+                    cur_r[nth_img, kth_feature, self.SCALE_V_PIXEL] = old_v_scale
+                else:
+                    old_loglik = new_loglik
+
+                # resample scale percentage
+                old_h_scale = cur_r[nth_img, kth_feature, self.SCALE_H_PIXEL]
+                # set a new horizontal scale
+                cur_r[nth_img, kth_feature, self.SCALE_H_PIXEL] = rand_h_scale[nth_img, kth_feature]
+                new_loglik = self._loglik_nth(cur_y, cur_z, cur_r, n = nth_img)
+                move_prob = 1 / (1 + np.exp(old_loglik - new_loglik))
+                if random.random() > move_prob: # revert changes if move_prob too small
+                    cur_r[nth_img, kth_feature, self.SCALE_H_PIXEL] = old_h_scale
                     
         return cur_r
     
@@ -342,9 +356,9 @@ class Gibbs(BaseSampler):
             nth_y = copy.deepcopy(cur_y) # the transformed cur_y with respect to nth
             kth_feat = 0
             for r_feat in cur_r[nth]: # r_feat refers to the transforms applied one feature
+                nth_y[kth_feat] = scale_manual(nth_y[kth_feat], self.img_w, r_feat[self.SCALE_H_PIXEL], r_feat[self.SCALE_V_PIXEL])
                 nth_y[kth_feat] = v_translate(nth_y[kth_feat], self.img_w, r_feat[self.V_TRANS])
                 nth_y[kth_feat] = h_translate(nth_y[kth_feat], self.img_w, r_feat[self.H_TRANS])
-                nth_y[kth_feat] = scale(nth_y[kth_feat], self.img_w, r_feat[self.SCALE_PIXEL])
                 kth_feat += 1
                 
             not_on_p[i] = np.power(1. - self.lam, np.dot(cur_z[nth], nth_y)) * (1. - self.epislon)
@@ -365,9 +379,9 @@ class Gibbs(BaseSampler):
             nth_y = copy.deepcopy(cur_y) # the transformed cur_y with respect to nth
             kth_feat = 0
             for r_feat in cur_r[nth]: # r_feat refers to the transforms applied one feature
+                nth_y[kth_feat] = scale_manual(nth_y[kth_feat], self.img_w, r_feat[self.SCALE_H_PIXEL], r_feat[self.SCALE_V_PIXEL])
                 nth_y[kth_feat] = v_translate(nth_y[kth_feat], self.img_w, r_feat[self.V_TRANS])
                 nth_y[kth_feat] = h_translate(nth_y[kth_feat], self.img_w, r_feat[self.H_TRANS])
-                nth_y[kth_feat] = scale(nth_y[kth_feat], self.img_w, r_feat[self.SCALE_PIXEL])
                 kth_feat += 1
                 
             not_on_p[nth] = np.power(1. - self.lam, np.dot(cur_z[nth], nth_y)) * (1. - self.epislon)
@@ -632,11 +646,6 @@ class Gibbs(BaseSampler):
                                      np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_y.shape[0]),
                                      np.int32(self.img_w))
             
-            #self.prg.logprob_z_data(self.queue, (cur_z.shape[0],), None, 
-            #                        d_cur_z, d_z_by_ry.data, self.d_obs, d_logprob.data, 
-            #                        np.int32(self.N), np.int32(cur_y.shape[1]), np.int32(cur_z.shape[1]), 
-            #                        np.float32(self.alpha), np.float32(self.lam), np.float32(self.epislon))
-
             d_loglik_y = cl.array.empty(self.queue, d_z_by_ry.shape, np.float32, allocator=self.mem_pool)
             self.prg.loglik_y(self.queue, d_z_by_ry.shape, None, 
                               d_z_by_ry.data, self.d_obs, d_loglik_y.data,
