@@ -234,8 +234,8 @@ class Gibbs(BaseSampler):
         """
         rand_v = np.random.randint(0, self.img_h, size=(cur_z.shape[0], cur_z.shape[1]))
         rand_h = np.random.randint(0, self.img_w, size=(cur_z.shape[0], cur_z.shape[1]))
-        rand_v_scale = np.random.randint(-self.img_h+1, self.img_h, size=(cur_z.shape[0], cur_z.shape[1]))
-        rand_h_scale = np.random.randint(-self.img_w+1, self.img_w, size=(cur_z.shape[0], cur_z.shape[1]))
+        rand_v_scale = np.random.randint(-self.img_h+2, self.img_h, size=(cur_z.shape[0], cur_z.shape[1]))
+        rand_h_scale = np.random.randint(-self.img_w+2, self.img_w, size=(cur_z.shape[0], cur_z.shape[1]))
         # iterate over each transformation and resample it 
         for nth_img in xrange(cur_r.shape[0]):
             for kth_feature in xrange(cur_r.shape[1]):
@@ -442,6 +442,7 @@ class Gibbs(BaseSampler):
                 hyper_pram = [self.alpha, self.lam, self.theta, self.epislon]
                 print(final_z.shape[1], *(hyper_pram + list(final_y.flatten())), file = output_file, sep=',')
                 print(final_z.shape[1], *(hyper_pram + list(final_z.flatten())), file = output_file, sep=',')
+                print(final_r)
             else:
                 cPickle.dump(self.samples, open(output_file, 'w'))
 
@@ -646,18 +647,22 @@ class Gibbs(BaseSampler):
                                      np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_y.shape[0]),
                                      np.int32(self.img_w))
             
-            d_loglik_y = cl.array.empty(self.queue, d_z_by_ry.shape, np.float32, allocator=self.mem_pool)
-            self.prg.loglik_y(self.queue, d_z_by_ry.shape, None, 
-                              d_z_by_ry.data, self.d_obs, d_loglik_y.data,
+            d_loglik = cl.array.empty(self.queue, d_z_by_ry.shape, np.float32, allocator=self.mem_pool)
+            self.prg.loglik(self.queue, d_z_by_ry.shape, None, 
+                              d_z_by_ry.data, self.d_obs, d_loglik.data,
                               np.int32(self.N), np.int32(cur_y.shape[1]), np.int32(cur_z.shape[1]), 
                               np.float32(self.lam), np.float32(self.epislon))
             
-            log_lik = d_loglik_y.get().sum()
+            log_lik = d_loglik.get().sum()
             self.gpu_time += time() - a_time
 
             # calculate the prior probability of Y
             num_on, num_off = (cur_y == 1).sum(), (cur_y == 0).sum()
             log_prior = num_on * np.log(self.theta) + num_off * np.log(1 - self.theta) + d_logprior_z.get().sum()
+
+            # calculate the prior probability of R
+            # we implement a slight bias towards no transformation
+            log_prior += (cur_r > 0).sum() * np.log(1 - self.phi) + (cur_r == 0).sum() * np.log(self.phi)
             
         else:
             # calculate the prior probability of Z

@@ -98,14 +98,12 @@ def scale_manual(f_img, f_img_width, x_pixel, y_pixel):
     if x_pixel == 0 and y_pixel == 0: return f_img
 
     f_img_height = int(f_img.shape[0] / f_img_width)
-    x_factor = (f_img_width + x_pixel) / f_img_width
-    y_factor = (f_img_height + y_pixel) / f_img_height
 
     # construct the original matrix
     f_img_mat = f_img.reshape((f_img_height, f_img_width))
     # compute the new height and width of scaled matrix
-    new_height = int(np.ceil(f_img_height * y_factor))
-    new_width = int(np.ceil(f_img_width * x_factor))
+    new_height = f_img_height + y_pixel
+    new_width = f_img_width + x_pixel
     # set up the new matrix in the same size as the old, because we assume overflow and fill by zero
     f_img_mat_new = np.zeros(f_img_mat.shape, dtype = f_img_mat.dtype)
 

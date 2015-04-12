@@ -85,11 +85,33 @@ void h_translate(local int *orig_y, local int *new_y, uint kth,
   }
 }
 
+void scale(local int *orig_y, local int *new_y, uint kth, 
+	   uint f_img_height, uint f_img_width, uint x_pixel, uint y_pixel,
+	   uint D) {
+
+  // compute the new height and width of scaled matrix
+  int new_height = f_img_height + y_pixel;
+  int new_width = f_img_width + x_pixel;
+
+  uint hh, ww, h, w;
+  for (h = 0; h < f_img_height; h++) {
+    for (w = 0; w < f_img_width; w++) {
+      hh = (int)round((float)h / new_height * f_img_height);
+      ww = (int)round((float)w / new_width * f_img_width);
+      if (hh < f_img_height & ww < f_img_width) {
+	new_y[kth * D + h * f_img_width + w] = orig_y[kth * D + hh * f_img_width + ww];
+      } else {
+	new_y[kth * D + h * f_img_width + w] = 0;
+      }
+    }
+  }
+}
+
 kernel void compute_z_by_ry(global int *cur_y, global int *cur_z, global int *cur_r,
 			    global int *z_by_ry, local int *orig_y, local int *new_y,
 			    uint N, uint D, uint K, uint f_img_width) {
 
-  const uint V_TRANS = 0, H_TRANS = 1, NUM_TRANS = 2;
+  const uint V_SCALE = 0, H_SCALE = 1, V_TRANS = 2, H_TRANS = 3, NUM_TRANS = 4;
   uint nth = get_global_id(0); // nth is the index of images
   uint kth = get_global_id(1); // kth is the index of features
   uint f_img_height = D / f_img_width;
@@ -98,6 +120,29 @@ kernel void compute_z_by_ry(global int *cur_y, global int *cur_z, global int *cu
   for (int dth = 0; dth < D; dth++) {
     orig_y[kth * D + dth] = cur_y[kth * D + dth];
   }
+  // wait until copying is done
+  barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE); 
+    
+  // vertically scale the feature image
+  uint v_scale = cur_r[nth * (K * NUM_TRANS) + kth * NUM_TRANS + V_SCALE];
+  scale(orig_y, new_y, kth, f_img_height, f_img_width, 0, v_scale, D);
+
+  // copy new_y back to orig_y so that new_y can be used again
+  for (int dth = 0; dth < D; dth++) {
+    orig_y[kth * D + dth] = new_y[kth * D + dth];
+  }
+  // wait until copying is done
+  barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE); 
+
+  // horizontal scale the feature image
+  uint h_scale = cur_r[nth * (K * NUM_TRANS) + kth * NUM_TRANS + H_SCALE];
+  scale(orig_y, new_y, kth, f_img_height, f_img_width, h_scale, 0, D);
+  
+  // copy new_y back to orig_y so that new_y can be used again
+  for (int dth = 0; dth < D; dth++) {
+    orig_y[kth * D + dth] = new_y[kth * D + dth];
+  }
+
   // wait until copying is done
   barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE); 
 
@@ -122,8 +167,9 @@ kernel void compute_z_by_ry(global int *cur_y, global int *cur_z, global int *cu
 
   /* at this point, for each object, a transformed y (new_y) has been generated */
   if (kth == 0) {
-    for (int k = 0; k < K; k++) {
-      for (int dth = 0; dth < D; dth++) {
+    for (int dth = 0; dth < D; dth++) {
+      z_by_ry[nth * D + dth] = 0;
+      for (int k = 0; k < K; k++) {
 	z_by_ry[nth * D + dth] += new_y[k * D + dth] * cur_z[nth * K + k];
       }
     }
@@ -139,7 +185,7 @@ kernel void sample_y(global int *cur_y,
 		     uint N, uint D, uint K, uint f_img_width,
 		     float lambda, float epislon, float theta) {
   
-  const uint V_TRANS = 0, H_TRANS = 1, NUM_TRANS = 2;
+  const uint V_SCALE = 0, H_SCALE = 1, V_TRANS = 2, H_TRANS = 3, NUM_TRANS = 4;
 
   uint kth = get_global_id(0); // k is the index of features
   uint dth = get_global_id(1); // d is the index of pixels
@@ -197,7 +243,7 @@ kernel void sample_z(global int *cur_y,
 		     uint N, uint D, uint K, uint f_img_width,
 		     float lambda, float epislon, float theta) {
   
-  const uint V_TRANS = 0, H_TRANS = 1, NUM_TRANS = 2;
+  const uint V_SCALE = 0, H_SCALE = 1, V_TRANS = 2, H_TRANS = 3, NUM_TRANS = 4;
   uint h, w, new_index; // variables used in the for loop
 
   uint nth = get_global_id(0); // n is the index of data
@@ -213,7 +259,7 @@ kernel void sample_z(global int *cur_y,
   uint v_dist = cur_r[nth * (K * NUM_TRANS) + kth * NUM_TRANS + V_TRANS];
   uint h_dist = cur_r[nth * (K * NUM_TRANS) + kth * NUM_TRANS + H_TRANS];
   
-  // extremely hackish way to calculate the probelihood
+  // extremely hackish way to calculate the likelihood
   for (int d = 0; d < D; d++) {
     // if the kth feature can turn on a pixel at d
     if (cur_y[kth * D + d] == 1) {
@@ -249,44 +295,6 @@ kernel void sample_z(global int *cur_y,
   //printf("after index: %d %f %f %d \n", nth * K + kth, post[0], post[1], cur_z[nth * K + kth]);
 }
 
-kernel void sample_v_trans(global int *cur_y, global int *cur_z, global int *cur_r, global int *new_v_trans,
-			   global int *z_by_ry, local int *orig_y, local int *new_y,
-			   global int *obs, uint N, uint D, uint K, uint f_img_width) {
-
-  const uint V_TRANS = 0, H_TRANS = 1, NUM_TRANS = 2;
-  uint nth = get_global_id(0); // nth is the index of images
-  uint kth = get_global_id(1); // kth is the index of features
-  uint f_img_height = D / f_img_width;
-
-  // copy the original feature image to local memory
-  for (int dth = 0; dth < D; dth++) {
-    orig_y[kth * D + dth] = cur_y[kth * D + dth];
-  }
-  // wait until copying is done
-  barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE); 
-
-  // vertically translate the feature image using the OLD vertical translation distance
-  uint v_dist = cur_r[nth * (K * NUM_TRANS) + kth * NUM_TRANS + V_TRANS];
-  v_translate(orig_y, new_y, kth, f_img_height, f_img_width, v_dist, D);
-  
-  // copy new_y back to orig_y so that new_y can be used again
-  for (int dth = 0; dth < D; dth++) {
-    orig_y[kth * D + dth] = new_y[kth * D + dth];
-  }
-  barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE); // wait until copying is done
-
-  // horizontally translate the feature image
-  uint h_dist = cur_r[nth * (K * NUM_TRANS) + kth * NUM_TRANS + H_TRANS];
-  h_translate(orig_y, new_y, kth, f_img_height, f_img_width, h_dist, D);
-  barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE);  // wait until all transformations is done
-
-  /* at this point, for each object, a transformed Y (new_y) has been generated */
-  uint weight;
-  for (int dth = 0; dth < D; dth++) {
-    weight += new_y[kth * D + dth] * cur_z[nth * K + kth];
-  }
-}
-
 kernel void sample_r(global int *replace_r, global int *z_by_ry_old, global int *z_by_ry_new,
 		     global int *obs, global float *rand,
 		     uint N, uint D, uint K,
@@ -307,57 +315,6 @@ kernel void sample_r(global int *replace_r, global int *z_by_ry_old, global int 
   float move_prob = 1 / (1 + exp(loglik_old - loglik_new));
   //printf("%f %f\n", loglik_old, loglik_new);
   replace_r[nth] = move_prob > rand[nth];
-}
-
-// deprecated
-kernel void logprob_z_data(global int *cur_z,
-			   global int *z_by_ry,
-			   global int *obs,
-			   global float *logprob,
-			   uint N, uint D, uint K,
-			   float alpha, float lambda, float epislon) {
-
-  uint nth = get_global_id(0); // n is the index of data
-  uint m;
-  uint novel_count = 0;
-  float logprob_temp = 0;
-
-  /* calculate the log probability of the nth row of Z 
-     i.e., the prior probability of having the features
-     of the nth object.
-   */
-  for (int k = 0; k < K; k++) {
-    m = 0;
-    for (int n = 0; n < nth; n++) {
-      m += cur_z[n * K + k];
-    }
-    if (m > 0) { // if other objects have had this feature
-      if (cur_z[nth * K + k] == 1) {
-	logprob_temp += log(m / (nth + 1.0f));
-      } else {
-	logprob_temp += log(1 - m / (nth + 1.0f));
-      }
-    } else { // if this is a novel feature
-      if (cur_z[nth * K + k] == 1) novel_count += 1;
-    }
-  }
-  if (novel_count > 0) {
-    logprob_temp += pois_logpmf(novel_count, alpha / (nth+1.0f));
-  }
-
-  /* calculate the log-likelihood of the nth row of data
-     given the corresponding row in z_by_ry
-  */
-  uint weight;
-  for (int d = 0; d < D; d++) {
-    weight = z_by_ry[nth * D + d];
-    if (obs[nth * D + d] == 1) {
-      logprob_temp += log(1 - pow(1 - lambda, weight) * (1 - epislon));
-    } else {
-      logprob_temp += weight * log(1 - lambda) + log(1 - epislon);
-    }
-  }
-  logprob[nth] = logprob_temp;
 }
 
 kernel void logprior_z(global uint *cur_z, global float *logprob,
@@ -410,22 +367,22 @@ kernel void logprior_z(global uint *cur_z, global float *logprob,
   logprob[nth * K + kth] = logprob_temp;
 }
 
-kernel void loglik_y(global int *z_by_ry,
+kernel void loglik(global int *z_by_ry,
 		      global int *obs,
-		      global float *loglik_y,
+		      global float *loglik,
 		      uint N, uint D, uint K,
 		      float lambda, float epislon) {
 
   uint nth = get_global_id(0); // nth is the index of data
   uint dth = get_global_id(1); // dth is the index of flattened pixels
 
-  /* calculate the log-likelihood of the nth row of data
-     given the corresponding row in z_by_ry
+  /* calculate the log-likelihood of the dth pixel of the nth object
+     given the corresponding weight in z_by_ry
   */
   uint weight = z_by_ry[nth * D + dth];
   if (obs[nth * D + dth] == 1) {
-    loglik_y[nth * D + dth] = log(1 - pow(1 - lambda, weight) * (1 - epislon));
+    loglik[nth * D + dth] = log(1 - pow(1 - lambda, weight) * (1 - epislon));
   } else {
-    loglik_y[nth * D + dth] = weight * log(1 - lambda) + log(1 - epislon);
+    loglik[nth * D + dth] = weight * log(1 - lambda) + log(1 - epislon);
   }
 }
