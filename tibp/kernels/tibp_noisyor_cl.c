@@ -368,10 +368,10 @@ kernel void logprior_z(global uint *cur_z, global float *logprob,
 }
 
 kernel void loglik(global int *z_by_ry,
-		      global int *obs,
-		      global float *loglik,
-		      uint N, uint D, uint K,
-		      float lambda, float epislon) {
+		   global int *obs,
+		   global float *loglik,
+		   uint N, uint D, uint K,
+		   float lambda, float epislon) {
 
   uint nth = get_global_id(0); // nth is the index of data
   uint dth = get_global_id(1); // dth is the index of flattened pixels

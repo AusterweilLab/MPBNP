@@ -483,7 +483,6 @@ class Gibbs(BaseSampler):
         d_z_by_ry = cl.array.zeros(self.queue, (cur_z.shape[0], cur_y.shape[1]), np.int32, allocator=self.mem_pool)
         d_z_col_sum = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
                                 hostbuf = cur_z.sum(axis = 0).astype(np.int32))
-        #d_rand = cl.array.to_device(self.queue, np.random.random(size = cur_z.shape).astype(np.float32), allocator=self.mem_pool)
         d_rand = cl.array.to_device(self.queue, np.random.random(cur_z.shape).astype(np.float32), allocator=self.mem_pool)
 
         # first transform the feature images and calculate z_by_ry
@@ -499,7 +498,6 @@ class Gibbs(BaseSampler):
                           np.int32(self.N), np.int32(self.d), np.int32(cur_y.shape[0]), np.int32(self.img_w),
                           np.float32(self.lam), np.float32(self.epislon), np.float32(self.theta))
 
-        #cl.enqueue_copy(self.queue, cur_z, d_cur_z)
         cur_z = d_cur_z.get()
         return cur_z
         
