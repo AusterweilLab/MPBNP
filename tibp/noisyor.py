@@ -15,8 +15,8 @@ np.set_printoptions(suppress=True)
 
 class Gibbs(BaseSampler):
 
-    SCALE_V_PIXEL = 0
-    SCALE_H_PIXEL = 1
+    V_SCALE = 0
+    H_SCALE = 1
     V_TRANS = 2
     H_TRANS = 3
     NUM_TRANS = 4
@@ -36,7 +36,7 @@ class Gibbs(BaseSampler):
         self.theta = theta # prior probability that a pixel is on in a feature image
         self.lam = lam # effecacy of a feature
         self.epislon = epislon # probability that a pixel is on by change in an actual image
-        self.phi = 0.6 # prior probability that non transformation is applied
+        self.phi = 0.8 # prior probability that no transformation is applied
         self.samples = {'z': [], 'y': [], 'r': []} # sample storage, to be pickled
 
     def read_csv(self, filepath, header=True):
@@ -88,9 +88,9 @@ class Gibbs(BaseSampler):
             assert(init_z.shape == (len(self.obs), self.k))
 
         if init_r is None:
-            init_r = np.empty(shape = (self.N, self.k, self.NUM_TRANS))
-            init_r[:,:,self.SCALE_V_PIXEL] = 0
-            init_r[:,:,self.SCALE_H_PIXEL] = 0
+            init_r = np.empty(shape = (self.N, self.k, self.NUM_TRANS), dtype=np.int32)
+            init_r[:,:,self.V_SCALE] = 0
+            init_r[:,:,self.H_SCALE] = 0
             init_r[:,:,self.V_TRANS] = np.random.randint(0, 2, (self.N, self.k))
             init_r[:,:,self.H_TRANS] = np.random.randint(0, 2, (self.N, self.k))
         else:
@@ -118,7 +118,6 @@ class Gibbs(BaseSampler):
             temp_cur_y = self._infer_y(cur_y, cur_z, cur_r)
             temp_cur_y, temp_cur_z, temp_cur_r = self._infer_z(temp_cur_y, cur_z, cur_r)
             temp_cur_r = self._infer_r(temp_cur_y, temp_cur_z, temp_cur_r)
-            #self._sample_lam(cur_y, cur_z)
 
             if self.record_best:
                 if self.auto_save_sample(sample = (temp_cur_y, temp_cur_z, temp_cur_r)):
@@ -245,8 +244,12 @@ class Gibbs(BaseSampler):
                 old_v_trans = cur_r[nth_img, kth_feature, self.V_TRANS]
                 # set a new vertical transformation
                 cur_r[nth_img, kth_feature, self.V_TRANS] = rand_v[nth_img, kth_feature] #np.random.randint(0, self.img_h)
+
+                old_logprior = np.log(abs((old_v_trans > 0) - self.phi))
+                new_logprior = np.log(abs((rand_v[nth_img, kth_feature] > 0) - self.phi))
+                
                 new_loglik = self._loglik_nth(cur_y, cur_z, cur_r, n = nth_img)
-                move_prob = 1 / (1 + np.exp(old_loglik - new_loglik))
+                move_prob = 1 / (1 + np.exp(old_loglik + old_logprior - new_loglik - new_logprior))
                 if random.random() > move_prob: # revert changes if move_prob too small
                     cur_r[nth_img, kth_feature, self.V_TRANS] = old_v_trans
                 else:
@@ -256,32 +259,44 @@ class Gibbs(BaseSampler):
                 old_h_trans = cur_r[nth_img, kth_feature, self.H_TRANS]
                 # set a new vertical transformation
                 cur_r[nth_img, kth_feature, self.H_TRANS] = rand_h[nth_img, kth_feature]
+
+                old_logprior = np.log(abs((old_h_trans > 0) - self.phi))
+                new_logprior = np.log(abs((rand_h[nth_img, kth_feature] > 0) - self.phi))
+
                 new_loglik = self._loglik_nth(cur_y, cur_z, cur_r, n = nth_img)
-                move_prob = 1 / (1 + np.exp(old_loglik - new_loglik))
+                move_prob = 1 / (1 + np.exp(old_loglik + old_logprior - new_loglik - new_logprior))
                 if random.random() > move_prob: # revert changes if move_prob too small
                     cur_r[nth_img, kth_feature, self.H_TRANS] = old_h_trans
                 else:
                     old_loglik = new_loglik
 
                 # resample scale percentage
-                old_v_scale = cur_r[nth_img, kth_feature, self.SCALE_V_PIXEL]
+                old_v_scale = cur_r[nth_img, kth_feature, self.V_SCALE]
                 # set a new vertical scale
-                cur_r[nth_img, kth_feature, self.SCALE_V_PIXEL] = rand_v_scale[nth_img, kth_feature]
+                cur_r[nth_img, kth_feature, self.V_SCALE] = rand_v_scale[nth_img, kth_feature]
+
+                old_logprior = np.log(abs((old_v_scale > 0) - self.phi))
+                new_logprior = np.log(abs((rand_v_scale[nth_img, kth_feature] > 0) - self.phi))
+
                 new_loglik = self._loglik_nth(cur_y, cur_z, cur_r, n = nth_img)
-                move_prob = 1 / (1 + np.exp(old_loglik - new_loglik))
+                move_prob = 1 / (1 + np.exp(old_loglik + old_logprior - new_loglik - new_logprior))
                 if random.random() > move_prob: # revert changes if move_prob too small
-                    cur_r[nth_img, kth_feature, self.SCALE_V_PIXEL] = old_v_scale
+                    cur_r[nth_img, kth_feature, self.V_SCALE] = old_v_scale
                 else:
                     old_loglik = new_loglik
 
                 # resample scale percentage
-                old_h_scale = cur_r[nth_img, kth_feature, self.SCALE_H_PIXEL]
+                old_h_scale = cur_r[nth_img, kth_feature, self.H_SCALE]
                 # set a new horizontal scale
-                cur_r[nth_img, kth_feature, self.SCALE_H_PIXEL] = rand_h_scale[nth_img, kth_feature]
+                cur_r[nth_img, kth_feature, self.H_SCALE] = rand_h_scale[nth_img, kth_feature]
+
+                old_logprior = np.log(abs((old_h_scale > 0) - self.phi))
+                new_logprior = np.log(abs((rand_h_scale[nth_img, kth_feature] > 0) - self.phi))
+
                 new_loglik = self._loglik_nth(cur_y, cur_z, cur_r, n = nth_img)
-                move_prob = 1 / (1 + np.exp(old_loglik - new_loglik))
+                move_prob = 1 / (1 + np.exp(old_loglik + old_logprior - new_loglik - new_logprior))
                 if random.random() > move_prob: # revert changes if move_prob too small
-                    cur_r[nth_img, kth_feature, self.SCALE_H_PIXEL] = old_h_scale
+                    cur_r[nth_img, kth_feature, self.H_SCALE] = old_h_scale
                     
         return cur_r
     
@@ -356,7 +371,7 @@ class Gibbs(BaseSampler):
             nth_y = copy.deepcopy(cur_y) # the transformed cur_y with respect to nth
             kth_feat = 0
             for r_feat in cur_r[nth]: # r_feat refers to the transforms applied one feature
-                nth_y[kth_feat] = scale_manual(nth_y[kth_feat], self.img_w, r_feat[self.SCALE_H_PIXEL], r_feat[self.SCALE_V_PIXEL])
+                nth_y[kth_feat] = scale_manual(nth_y[kth_feat], self.img_w, r_feat[self.H_SCALE], r_feat[self.V_SCALE])
                 nth_y[kth_feat] = v_translate(nth_y[kth_feat], self.img_w, r_feat[self.V_TRANS])
                 nth_y[kth_feat] = h_translate(nth_y[kth_feat], self.img_w, r_feat[self.H_TRANS])
                 kth_feat += 1
@@ -379,7 +394,7 @@ class Gibbs(BaseSampler):
             nth_y = copy.deepcopy(cur_y) # the transformed cur_y with respect to nth
             kth_feat = 0
             for r_feat in cur_r[nth]: # r_feat refers to the transforms applied one feature
-                nth_y[kth_feat] = scale_manual(nth_y[kth_feat], self.img_w, r_feat[self.SCALE_H_PIXEL], r_feat[self.SCALE_V_PIXEL])
+                nth_y[kth_feat] = scale_manual(nth_y[kth_feat], self.img_w, r_feat[self.H_SCALE], r_feat[self.V_SCALE])
                 nth_y[kth_feat] = v_translate(nth_y[kth_feat], self.img_w, r_feat[self.V_TRANS])
                 nth_y[kth_feat] = h_translate(nth_y[kth_feat], self.img_w, r_feat[self.H_TRANS])
                 kth_feat += 1
@@ -410,17 +425,16 @@ class Gibbs(BaseSampler):
         @param init_z: Passed in from do_inference()
         @param init_r: Passed in from do_inference()
         """
+        a_time = time()
         cur_y = init_y.astype(np.int32)
         cur_z = init_z.astype(np.int32)
         cur_r = init_r.astype(np.int32) # this is fine with only translations
 
         self.auto_save_sample(sample = (cur_y, cur_z, cur_r))
         for i in xrange(self.niter):
-            a_time = time()
             temp_cur_y = self._cl_infer_y(cur_y, cur_z, cur_r)
             temp_cur_z = self._cl_infer_z(temp_cur_y, cur_z, cur_r)
             temp_cur_r = self._cl_infer_r(temp_cur_y, temp_cur_z, cur_r).astype(np.int32)
-            self.gpu_time += time() - a_time
             temp_cur_y, temp_cur_z, temp_cur_r = self._cl_infer_k_new(temp_cur_y, temp_cur_z, temp_cur_r)
 
             if self.record_best:
@@ -434,7 +448,7 @@ class Gibbs(BaseSampler):
                 self.samples['y'].append(cur_y)
                 self.samples['y'].append(cur_r)
             
-            self.total_time += time() - a_time
+        self.total_time += time() - a_time
 
         if output_file is not None:
             if self.record_best:
@@ -451,11 +465,13 @@ class Gibbs(BaseSampler):
     def _cl_infer_y(self, cur_y, cur_z, cur_r):
         """Infer feature images
         """
+        a_time = time()
         d_cur_z = cl.array.to_device(self.queue, cur_z.astype(np.int32), allocator=self.mem_pool)
         d_cur_y = cl.array.to_device(self.queue, cur_y.astype(np.int32), allocator=self.mem_pool)
         d_cur_r = cl.array.to_device(self.queue, cur_r.astype(np.int32), allocator=self.mem_pool)
-        d_z_by_ry = cl.array.zeros(self.queue, (cur_z.shape[0], cur_y.shape[1]), np.int32, allocator=self.mem_pool)
-        d_rand = cl.array.to_device(self.queue, np.random.random(cur_y.shape).astype(np.float32), allocator=self.mem_pool)
+        d_z_by_ry = cl.array.empty(self.queue, (cur_z.shape[0], cur_y.shape[1]), np.int32, allocator=self.mem_pool)
+        d_rand = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
+                           hostbuf = np.random.random(cur_z.shape).astype(np.float32))
 
         # first transform the feature images and calculate z_by_ry
         self.prg.compute_z_by_ry(self.queue, cur_z.shape, (1, cur_z.shape[1]),
@@ -466,24 +482,26 @@ class Gibbs(BaseSampler):
 
         # calculate the prior probability that a pixel is on
         self.prg.sample_y(self.queue, cur_y.shape, None,
-                          d_cur_y.data, d_cur_z.data, d_z_by_ry.data, d_cur_r.data, self.d_obs, d_rand.data, 
+                          d_cur_y.data, d_cur_z.data, d_z_by_ry.data, d_cur_r.data, self.d_obs, d_rand, 
                           np.int32(self.N), np.int32(self.d), np.int32(cur_y.shape[0]), np.int32(self.img_w),
                           np.float32(self.lam), np.float32(self.epislon), np.float32(self.theta))
 
         cur_y = d_cur_y.get()
-        #cl.enqueue_copy(self.queue, cur_y, d_cur_y)
+        self.gpu_time += time() - a_time
         return cur_y
 
     def _cl_infer_z(self, cur_y, cur_z, cur_r):
         """Infer feature ownership
         """
+        a_time = time()
         d_cur_z = cl.array.to_device(self.queue, cur_z.astype(np.int32), allocator=self.mem_pool)
         d_cur_y = cl.array.to_device(self.queue, cur_y.astype(np.int32), allocator=self.mem_pool)
         d_cur_r = cl.array.to_device(self.queue, cur_r.astype(np.int32), allocator=self.mem_pool)
-        d_z_by_ry = cl.array.zeros(self.queue, (cur_z.shape[0], cur_y.shape[1]), np.int32, allocator=self.mem_pool)
+        d_z_by_ry = cl.array.empty(self.queue, (cur_z.shape[0], cur_y.shape[1]), np.int32, allocator=self.mem_pool)
         d_z_col_sum = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
                                 hostbuf = cur_z.sum(axis = 0).astype(np.int32))
-        d_rand = cl.array.to_device(self.queue, np.random.random(cur_z.shape).astype(np.float32), allocator=self.mem_pool)
+        d_rand = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
+                           hostbuf = np.random.random(cur_z.shape).astype(np.float32))
 
         # first transform the feature images and calculate z_by_ry
         self.prg.compute_z_by_ry(self.queue, cur_z.shape, (1, cur_z.shape[1]),
@@ -494,11 +512,12 @@ class Gibbs(BaseSampler):
 
         # calculate the prior probability that a pixel is on
         self.prg.sample_z(self.queue, cur_z.shape, None,
-                          d_cur_y.data, d_cur_z.data, d_cur_r.data, d_z_by_ry.data, d_z_col_sum, self.d_obs, d_rand.data, 
+                          d_cur_y.data, d_cur_z.data, d_cur_r.data, d_z_by_ry.data, d_z_col_sum, self.d_obs, d_rand, 
                           np.int32(self.N), np.int32(self.d), np.int32(cur_y.shape[0]), np.int32(self.img_w),
                           np.float32(self.lam), np.float32(self.epislon), np.float32(self.theta))
 
         cur_z = d_cur_z.get()
+        self.gpu_time += time() - a_time
         return cur_z
         
     def _cl_infer_k_new(self, cur_y, cur_z, cur_r):
@@ -539,14 +558,25 @@ class Gibbs(BaseSampler):
 
     def _cl_infer_r(self, cur_y, cur_z, cur_r):
         """Infer transformations using opencl.
+        Note: the algorithm works because resampling one value of cur_r at one time
+        only affects the loglikelihood of the corresponding image. Therefore, it is
+        possible to resample one aspect of transformation for all images at the same
+        time, as long as the new values are accepted / rejected independently of
+        each other.
         """
+        a_time = time()
         d_cur_z = cl.array.to_device(self.queue, cur_z.astype(np.int32), allocator=self.mem_pool)
         d_cur_y = cl.array.to_device(self.queue, cur_y.astype(np.int32), allocator=self.mem_pool)
+        d_z_by_ry_old = cl.array.empty(self.queue, self.obs.shape, np.int32, allocator=self.mem_pool)
+        d_z_by_ry_new = cl.array.empty(self.queue, self.obs.shape, np.int32, allocator=self.mem_pool)
+        d_replace_r = cl.array.empty(self.queue, (self.N,), np.int32, allocator=self.mem_pool)
+        d_rand = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR,
+                           hostbuf=np.random.random(self.N).astype(np.float32))
+
+        ########### Dealing with vertical translations first ##########
         d_cur_r = cl.array.to_device(self.queue, cur_r.astype(np.int32), allocator=self.mem_pool)
-        d_z_by_ry = cl.array.zeros(self.queue, (cur_z.shape[0], cur_y.shape[1]), np.int32, allocator=self.mem_pool)
-        
+
         # calculate the z_by_ry_old under old transformations
-        d_z_by_ry_old = cl.array.zeros(self.queue, (cur_z.shape[0], cur_y.shape[1]), np.int32, allocator=self.mem_pool)
         self.prg.compute_z_by_ry(self.queue, cur_z.shape, (1, cur_z.shape[1]),
                                  d_cur_y.data, d_cur_z.data, d_cur_r.data, d_z_by_ry_old.data, 
                                  cl.LocalMemory(cur_y.nbytes), cl.LocalMemory(cur_y.nbytes),
@@ -556,21 +586,23 @@ class Gibbs(BaseSampler):
         # calculate the z_by_ry_new under new randomly generated transformations
         cur_r_new = np.copy(cur_r)
         cur_r_new[:,:,self.V_TRANS] = np.random.randint(0, self.img_h, size = (cur_r_new.shape[0], cur_r_new.shape[1]))
-        d_cur_r_new = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = cur_r_new)
+        d_cur_r_new = cl.array.to_device(self.queue, cur_r_new.astype(np.int32), allocator=self.mem_pool)
         
-        d_z_by_ry_new = cl.array.zeros(self.queue, (cur_z.shape[0], cur_y.shape[1]), np.int32, allocator=self.mem_pool)
         self.prg.compute_z_by_ry(self.queue, cur_z.shape, (1, cur_z.shape[1]),
-                                 d_cur_y.data, d_cur_z.data, d_cur_r_new, d_z_by_ry_new.data, 
+                                 d_cur_y.data, d_cur_z.data, d_cur_r_new.data, d_z_by_ry_new.data, 
                                  cl.LocalMemory(cur_y.nbytes), cl.LocalMemory(cur_y.nbytes),
                                  np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_y.shape[0]),
                                  np.int32(self.img_w))
 
         # reject or accept newly proposed transformations on a per-object basis
-        d_replace_r = cl.array.empty(self.queue, (self.N,), np.int32, allocator=self.mem_pool)
-        d_rand = cl.array.to_device(self.queue, np.random.random(self.N).astype(np.float32), allocator=self.mem_pool)
-        
+        d_logprior_old = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
+                                   hostbuf = np.log(abs((cur_r[:,:,self.V_TRANS] > 0) - self.phi)).astype(np.float32)) 
+        d_logprior_new = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
+                                   hostbuf = np.log(abs((cur_r_new[:,:,self.V_TRANS] > 0) - self.phi)).astype(np.float32)) 
+
         self.prg.sample_r(self.queue, (self.N, ), None,
-                          d_replace_r.data, d_z_by_ry_old.data, d_z_by_ry_new.data, self.d_obs, d_rand.data,
+                          d_replace_r.data, d_z_by_ry_old.data, d_z_by_ry_new.data, 
+                          d_logprior_old, d_logprior_new, self.d_obs, d_rand,
                           np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_y.shape[0]),
                           np.float32(self.lam), np.float32(self.epislon))
 
@@ -581,7 +613,6 @@ class Gibbs(BaseSampler):
         d_cur_r = cl.array.to_device(self.queue, cur_r.astype(np.int32), allocator=self.mem_pool)
 
         # calculate the z_by_ry_old under old transformations
-        d_z_by_ry_old.fill(0)#cl.array.zeros(self.queue, (cur_z.shape[0], cur_y.shape[1]), np.int32)
         self.prg.compute_z_by_ry(self.queue, cur_z.shape, (1, cur_z.shape[1]),
                                  d_cur_y.data, d_cur_z.data, d_cur_r.data, d_z_by_ry_old.data, 
                                  cl.LocalMemory(cur_y.nbytes), cl.LocalMemory(cur_y.nbytes),
@@ -593,7 +624,6 @@ class Gibbs(BaseSampler):
         cur_r_new[:,:,self.H_TRANS] = np.random.randint(0, self.img_w, size = (cur_r_new.shape[0], cur_r_new.shape[1]))
         d_cur_r_new = cl.array.to_device(self.queue, cur_r_new.astype(np.int32), allocator=self.mem_pool)
         
-        d_z_by_ry_new.fill(0)# = cl.array.zeros(self.queue, (cur_z.shape[0], cur_y.shape[1]), np.int32)
         self.prg.compute_z_by_ry(self.queue, cur_z.shape, (1, cur_z.shape[1]),
                                  d_cur_y.data, d_cur_z.data, d_cur_r_new.data, d_z_by_ry_new.data, 
                                  cl.LocalMemory(cur_y.nbytes), cl.LocalMemory(cur_y.nbytes),
@@ -601,16 +631,93 @@ class Gibbs(BaseSampler):
                                  np.int32(self.img_w))
 
         # reject or accept newly proposed transformations on a per-object basis
-        d_replace_r.fill(0)# = cl.array.empty(self.queue, (self.N,), np.int32)
-        d_rand = cl.array.to_device(self.queue, np.random.random(self.N).astype(np.float32), allocator=self.mem_pool)
-        
+        d_logprior_old = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
+                                   hostbuf = np.log(abs((cur_r[:,:,self.H_TRANS] > 0) - self.phi)).astype(np.float32)) 
+        d_logprior_new = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
+                                   hostbuf = np.log(abs((cur_r_new[:,:,self.H_TRANS] > 0) - self.phi)).astype(np.float32)) 
+
         self.prg.sample_r(self.queue, (self.N, ), None,
-                          d_replace_r.data, d_z_by_ry_old.data, d_z_by_ry_new.data, self.d_obs, d_rand.data,
+                          d_replace_r.data, d_z_by_ry_old.data, d_z_by_ry_new.data, 
+                          d_logprior_old, d_logprior_new, self.d_obs, d_rand,
                           np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_y.shape[0]),
                           np.float32(self.lam), np.float32(self.epislon))
 
         replace_r = d_replace_r.get()
         cur_r[np.where(replace_r == 1)] = cur_r_new[np.where(replace_r == 1)]
+
+        ########### Dealing with vertical scaling next ##########
+        d_cur_r = cl.array.to_device(self.queue, cur_r.astype(np.int32), allocator=self.mem_pool)
+
+        # calculate the z_by_ry_old under old transformations
+        self.prg.compute_z_by_ry(self.queue, cur_z.shape, (1, cur_z.shape[1]),
+                                 d_cur_y.data, d_cur_z.data, d_cur_r.data, d_z_by_ry_old.data, 
+                                 cl.LocalMemory(cur_y.nbytes), cl.LocalMemory(cur_y.nbytes),
+                                 np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_y.shape[0]),
+                                 np.int32(self.img_w))
+
+        # calculate the z_by_ry_new under new randomly generated transformations
+        cur_r_new = np.copy(cur_r)
+        cur_r_new[:,:,self.V_SCALE] = np.random.randint(-self.img_h+2, self.img_h, size = (cur_r_new.shape[0], cur_r_new.shape[1]))
+        d_cur_r_new = cl.array.to_device(self.queue, cur_r_new.astype(np.int32), allocator=self.mem_pool)
+        
+        self.prg.compute_z_by_ry(self.queue, cur_z.shape, (1, cur_z.shape[1]),
+                                 d_cur_y.data, d_cur_z.data, d_cur_r_new.data, d_z_by_ry_new.data, 
+                                 cl.LocalMemory(cur_y.nbytes), cl.LocalMemory(cur_y.nbytes),
+                                 np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_y.shape[0]),
+                                 np.int32(self.img_w))
+
+        # reject or accept newly proposed transformations on a per-object basis
+        d_logprior_old = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
+                                   hostbuf = np.log(abs((cur_r[:,:,self.V_SCALE] > 0) - self.phi)).astype(np.float32)) 
+        d_logprior_new = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
+                                   hostbuf = np.log(abs((cur_r_new[:,:,self.V_SCALE] > 0) - self.phi)).astype(np.float32)) 
+
+        self.prg.sample_r(self.queue, (self.N, ), None,
+                          d_replace_r.data, d_z_by_ry_old.data, d_z_by_ry_new.data, 
+                          d_logprior_old, d_logprior_new, self.d_obs, d_rand,
+                          np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_y.shape[0]),
+                          np.float32(self.lam), np.float32(self.epislon))
+
+        replace_r = d_replace_r.get()
+        cur_r[np.where(replace_r == 1)] = cur_r_new[np.where(replace_r == 1)]
+
+
+        ########### Dealing with horizontal scaling next ##########
+        d_cur_r = cl.array.to_device(self.queue, cur_r.astype(np.int32), allocator=self.mem_pool)
+
+        # calculate the z_by_ry_old under old transformations
+        self.prg.compute_z_by_ry(self.queue, cur_z.shape, (1, cur_z.shape[1]),
+                                 d_cur_y.data, d_cur_z.data, d_cur_r.data, d_z_by_ry_old.data, 
+                                 cl.LocalMemory(cur_y.nbytes), cl.LocalMemory(cur_y.nbytes),
+                                 np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_y.shape[0]),
+                                 np.int32(self.img_w))
+
+        # calculate the z_by_ry_new under new randomly generated transformations
+        cur_r_new = np.copy(cur_r)
+        cur_r_new[:,:,self.H_SCALE] = np.random.randint(-self.img_w+2, self.img_w, size = (cur_r_new.shape[0], cur_r_new.shape[1]))
+        d_cur_r_new = cl.array.to_device(self.queue, cur_r_new.astype(np.int32), allocator=self.mem_pool)
+        
+        self.prg.compute_z_by_ry(self.queue, cur_z.shape, (1, cur_z.shape[1]),
+                                 d_cur_y.data, d_cur_z.data, d_cur_r_new.data, d_z_by_ry_new.data, 
+                                 cl.LocalMemory(cur_y.nbytes), cl.LocalMemory(cur_y.nbytes),
+                                 np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_y.shape[0]),
+                                 np.int32(self.img_w))
+
+        # reject or accept newly proposed transformations on a per-object basis
+        d_logprior_old = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
+                                   hostbuf = np.log(abs((cur_r[:,:,self.H_SCALE] > 0) - self.phi)).astype(np.float32)) 
+        d_logprior_new = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
+                                   hostbuf = np.log(abs((cur_r_new[:,:,self.H_SCALE] > 0) - self.phi)).astype(np.float32)) 
+        self.prg.sample_r(self.queue, (self.N, ), None,
+                          d_replace_r.data, d_z_by_ry_old.data, d_z_by_ry_new.data, 
+                          d_logprior_old, d_logprior_new, self.d_obs, d_rand,
+                          np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_y.shape[0]),
+                          np.float32(self.lam), np.float32(self.epislon))
+
+        replace_r = d_replace_r.get()
+        cur_r[np.where(replace_r == 1)] = cur_r_new[np.where(replace_r == 1)]
+
+        self.gpu_time += time() - a_time
         return cur_r
 
     
@@ -627,7 +734,7 @@ class Gibbs(BaseSampler):
             d_cur_z = cl.array.to_device(self.queue, cur_z.astype(np.int32), allocator=self.mem_pool)
             d_cur_y = cl.array.to_device(self.queue, cur_y.astype(np.int32), allocator=self.mem_pool)
             d_cur_r = cl.array.to_device(self.queue, cur_r.astype(np.int32), allocator=self.mem_pool)
-            d_z_by_ry = cl.array.zeros(self.queue, (cur_z.shape[0], cur_y.shape[1]), np.int32, allocator=self.mem_pool)
+            d_z_by_ry = cl.array.empty(self.queue, (cur_z.shape[0], cur_y.shape[1]), np.int32, allocator=self.mem_pool)
             
             # calculate the log prior of Z
             d_logprior_z = cl.array.empty(self.queue, cur_z.shape, np.float32, allocator=self.mem_pool)

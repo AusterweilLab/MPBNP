@@ -199,31 +199,45 @@ kernel void sample_y(global int *cur_y,
   // calculate the prior probability of each cell is 1
   float on_loglik_temp = log(theta); 
   float off_loglik_temp = log(1 - theta);
-  
+
+  int v_scale, h_scale, v_dist, h_dist, new_height, new_width, new_index;
   // extremely hackish way to calculate the loglikelihood
   for (int n = 0; n < N; n++) {
     // if the nth object has the kth feature
     if (cur_z[n * K + kth] == 1) {
       // retrieve the transformation applied to this feature by this object
-      uint v_dist = cur_r[n * (K * NUM_TRANS) + kth * NUM_TRANS + V_TRANS];
-      uint h_dist = cur_r[n * (K * NUM_TRANS) + kth * NUM_TRANS + H_TRANS];
-      uint new_index = ((v_dist + h) % f_img_height) * f_img_width + (h_dist + w) % f_img_width;
+      v_scale = cur_r[n * (K * NUM_TRANS) + kth * NUM_TRANS + V_SCALE];
+      h_scale = cur_r[n * (K * NUM_TRANS) + kth * NUM_TRANS + H_SCALE];
+      v_dist = cur_r[n * (K * NUM_TRANS) + kth * NUM_TRANS + V_TRANS];
+      h_dist = cur_r[n * (K * NUM_TRANS) + kth * NUM_TRANS + H_TRANS];
+      new_height = f_img_height + v_scale;
+      new_width = f_img_width + h_scale;
 
-      // if the observed pixel at dth is on
-      if (obs[n * D + new_index] == 1) { // transformed feature affects the pixel at new_index not dth, cf., ibp
-	// if the feature image previously has this pixel on
-	if (cur_y[kth * D + dth] == 1) { // this is dth instead of new_index because we are referring to the original y
-	  on_loglik_temp += log(1 - pow(1 - lambda, z_by_ry[n * D + new_index]) * (1 - epislon));
-	  off_loglik_temp += log(1 - pow(1 - lambda, z_by_ry[n * D + new_index] - 1) * (1 - epislon));
-	} else {
-	  on_loglik_temp += log(1 - pow(1 - lambda, z_by_ry[n * D + new_index] + 1) * (1 - epislon));
-	  off_loglik_temp += log(1 - pow(1 - lambda, z_by_ry[n * D + new_index]) * (1 - epislon));
+      // loop over all pixels
+      for (uint hh = 0; hh < f_img_height; hh++) {
+	for (uint ww = 0; ww < f_img_width; ww++) {
+	  if ((int)round((float)hh / new_height * f_img_height) == h &
+	      (int)round((float)ww / new_width * f_img_width) == w) {
+	    new_index = ((v_dist + hh) % f_img_height) * f_img_width + (h_dist + ww) % f_img_width;
+
+	    // if the observed pixel at dth is on
+	    if (obs[n * D + new_index] == 1) { // transformed feature affects the pixel at new_index not dth, cf., ibp
+	      // if the feature image previously has this pixel on
+	      if (cur_y[kth * D + dth] == 1) { // this is dth instead of new_index because we are referring to the original y
+		on_loglik_temp += log(1 - pow(1 - lambda, z_by_ry[n * D + new_index]) * (1 - epislon));
+		off_loglik_temp += log(1 - pow(1 - lambda, z_by_ry[n * D + new_index] - 1) * (1 - epislon));
+	      } else {
+		on_loglik_temp += log(1 - pow(1 - lambda, z_by_ry[n * D + new_index] + 1) * (1 - epislon));
+		off_loglik_temp += log(1 - pow(1 - lambda, z_by_ry[n * D + new_index]) * (1 - epislon));
+	      }
+	    } else { // else obs[n * D + new_index] == 0
+	      on_loglik_temp += log(1 - lambda);
+	      off_loglik_temp += log(1.0f);
+	    }
+	  }
 	}
-      } else {
-	on_loglik_temp += log(1 - lambda);
-	off_loglik_temp += log(1.0f);
       }
-    } 
+    }
   }
   float logpost[2] = {on_loglik_temp, off_loglik_temp};
   //printf("%f %f %d \n", logpost[0], logpost[1], cur_y[kth * D + dth]);
@@ -256,8 +270,11 @@ kernel void sample_z(global int *cur_y,
   float off_prob_temp = 1 - (z_col_sum[kth] - cur_z[nth * K + kth]) / (float)N;
 
   // retrieve the transformation applied to this feature by this object
-  uint v_dist = cur_r[nth * (K * NUM_TRANS) + kth * NUM_TRANS + V_TRANS];
-  uint h_dist = cur_r[nth * (K * NUM_TRANS) + kth * NUM_TRANS + H_TRANS];
+  int v_scale = cur_r[nth * (K * NUM_TRANS) + kth * NUM_TRANS + V_SCALE];
+  int h_scale = cur_r[nth * (K * NUM_TRANS) + kth * NUM_TRANS + H_SCALE];
+  int v_dist = cur_r[nth * (K * NUM_TRANS) + kth * NUM_TRANS + V_TRANS];
+  int h_dist = cur_r[nth * (K * NUM_TRANS) + kth * NUM_TRANS + H_TRANS];
+  int new_height = f_img_height + v_scale, new_width = f_img_width + h_scale;
   
   // extremely hackish way to calculate the likelihood
   for (int d = 0; d < D; d++) {
@@ -266,24 +283,32 @@ kernel void sample_z(global int *cur_y,
       // unpack d into h and w and get new index
       h = d / f_img_width;
       w = d % f_img_width;
-      new_index = ((v_dist + h) % f_img_height) * f_img_width + (h_dist + w) % f_img_width;
+
+      for (uint hh = 0; hh < f_img_height; hh++) {
+	for (uint ww = 0; ww < f_img_width; ww++) {
+	  if ((int)round((float)hh / new_height * f_img_height) == h &
+	      (int)round((float)ww / new_width * f_img_width) == w) {
+	    new_index = ((v_dist + hh) % f_img_height) * f_img_width + (h_dist + ww) % f_img_width;
       
-      // then the corresponding observed pixel is at new_index
-      // so, if the observed pixel at new_index is on
-      if (obs[nth * D + new_index] == 1) {
-	// if the nth object previously has the kth feature
-	if (cur_z[nth * K + kth] == 1) {
-	  on_prob_temp *= 1 - pow(1 - lambda, z_by_ry[nth * D + new_index]) * (1 - epislon);
-	  off_prob_temp *= 1 - pow(1 - lambda, z_by_ry[nth * D + new_index] - 1) * (1 - epislon);
-	} else {
-	  on_prob_temp *= 1 - pow(1 - lambda, z_by_ry[nth * D + new_index] + 1) * (1 - epislon);
-	  off_prob_temp *= 1 - pow(1 - lambda, z_by_ry[nth * D + new_index]) * (1 - epislon);
+	    // then the corresponding observed pixel is at new_index
+	    // so, if the observed pixel at new_index is on
+	    if (obs[nth * D + new_index] == 1) {
+	      // if the nth object previously has the kth feature
+	      if (cur_z[nth * K + kth] == 1) {
+		on_prob_temp *= 1 - pow(1 - lambda, z_by_ry[nth * D + new_index]) * (1 - epislon);
+		off_prob_temp *= 1 - pow(1 - lambda, z_by_ry[nth * D + new_index] - 1) * (1 - epislon);
+	      } else {
+		on_prob_temp *= 1 - pow(1 - lambda, z_by_ry[nth * D + new_index] + 1) * (1 - epislon);
+		off_prob_temp *= 1 - pow(1 - lambda, z_by_ry[nth * D + new_index]) * (1 - epislon);
+	      }
+	    } else {
+	      on_prob_temp *= 1 - lambda;
+	      off_prob_temp *= 1.0f;
+	    }
+	  } 
 	}
-      } else {
-	on_prob_temp *= 1 - lambda;
-	off_prob_temp *= 1.0f;
       }
-    } 
+    }
   }
   
   //printf("index: %d post_on: %f post_off: %f\n", nth * K + kth, on_prob_temp, off_prob_temp);
@@ -296,6 +321,7 @@ kernel void sample_z(global int *cur_y,
 }
 
 kernel void sample_r(global int *replace_r, global int *z_by_ry_old, global int *z_by_ry_new,
+		     global float *logprior_old, global float *logprior_new,
 		     global int *obs, global float *rand,
 		     uint N, uint D, uint K,
 		     float lambda, float epislon) {
@@ -303,6 +329,10 @@ kernel void sample_r(global int *replace_r, global int *z_by_ry_old, global int 
   uint nth = get_global_id(0);
   float loglik_old = 0;
   float loglik_new = 0;
+  for (int kth = 0; kth < K; kth++) {
+    loglik_old += logprior_old[nth * K + kth];
+    loglik_new += logprior_new[nth * K + kth];
+  }
   for (int dth = 0; dth < D; dth++) {
     if (obs[nth * D + dth] == 1) {
       loglik_old += log(1 - pow(1 - lambda, z_by_ry_old[nth * D + dth]) * (1 - epislon));
