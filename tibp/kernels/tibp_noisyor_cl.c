@@ -200,9 +200,9 @@ kernel void sample_y(global int *cur_y,
   float on_loglik_temp = log(theta); 
   float off_loglik_temp = log(1 - theta);
 
-  int v_scale, h_scale, v_dist, h_dist, new_height, new_width, new_index;
+  int v_scale, h_scale, v_dist, h_dist, new_height, new_width, new_index, n, hh, ww;
   // extremely hackish way to calculate the loglikelihood
-  for (int n = 0; n < N; n++) {
+  for (n = 0; n < N; n++) {
     // if the nth object has the kth feature
     if (cur_z[n * K + kth] == 1) {
       // retrieve the transformation applied to this feature by this object
@@ -214,8 +214,8 @@ kernel void sample_y(global int *cur_y,
       new_width = f_img_width + h_scale;
 
       // loop over all pixels
-      for (uint hh = 0; hh < f_img_height; hh++) {
-	for (uint ww = 0; ww < f_img_width; ww++) {
+      for (hh = 0; hh < f_img_height; hh++) {
+	for (ww = 0; ww < f_img_width; ww++) {
 	  if ((int)round((float)hh / new_height * f_img_height) == h &
 	      (int)round((float)ww / new_width * f_img_width) == w) {
 	    new_index = ((v_dist + hh) % f_img_height) * f_img_width + (h_dist + ww) % f_img_width;
@@ -276,16 +276,17 @@ kernel void sample_z(global int *cur_y,
   int h_dist = cur_r[nth * (K * NUM_TRANS) + kth * NUM_TRANS + H_TRANS];
   int new_height = f_img_height + v_scale, new_width = f_img_width + h_scale;
   
+  uint d, hh, ww;
   // extremely hackish way to calculate the likelihood
-  for (int d = 0; d < D; d++) {
+  for (d = 0; d < D; d++) {
     // if the kth feature can turn on a pixel at d
     if (cur_y[kth * D + d] == 1) {
       // unpack d into h and w and get new index
       h = d / f_img_width;
       w = d % f_img_width;
 
-      for (uint hh = 0; hh < f_img_height; hh++) {
-	for (uint ww = 0; ww < f_img_width; ww++) {
+      for (hh = 0; hh < f_img_height; hh++) {
+	for (ww = 0; ww < f_img_width; ww++) {
 	  if ((int)round((float)hh / new_height * f_img_height) == h &
 	      (int)round((float)ww / new_width * f_img_width) == w) {
 	    new_index = ((v_dist + hh) % f_img_height) * f_img_width + (h_dist + ww) % f_img_width;
