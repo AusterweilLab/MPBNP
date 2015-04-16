@@ -16,23 +16,27 @@ MPBNP can be used on Windows 7/8/10, Linux and Mac OSX. In the following, we lis
 
 * Latest OpenCL drivers
 
-  * If you have an AMD Radeon graphics card, discrete or APU, the graphics driver already contains the OpenCL driver. AMD's OpenCL driver supports running OpenCL code on both their graphics cards (GPUs), and any x86 CPUs (AMD or Intel).
-  * If you have an nVidia graphics card, the graphics driver already contains the OpenCL driver. nVidia's OpenCL driver supports only their graphics cards.
-  * If you have an Intel graphics card that is integrated into an Intel CPU (known as Intel HD Graphics 4xxx and above), and do **NOT** have a discrete graphics card installed, the Intel graphics driver already contains the OpenCL driver. 
+  * If you have an AMD Radeon graphics card, discrete or APU, the graphics driver (which should have been already installed; otherwise your display wouldn't be fully functional) contains the OpenCL driver. 
+  > AMD's OpenCL driver supports running OpenCL code on both their graphics cards (GPUs), and any x86 CPUs (AMD or Intel).
 
-    **Important!** The current Intel driver contains a bug in calculating ``lgamma``, which is used in MPBNP's Chinese Restaurant Process sampler. Please avoid using the sampler on Intel HD Graphics iGPUs until an updated Intel graphics driver is scheduled to release in June 2015.
+  * If you have an nVidia graphics card, the graphics driver (which should have been already installed; otherwise your display wouldn't be fully functional) contains the OpenCL driver. 
+  > nVidia's OpenCL driver supports only their graphics cards.
+
+  * If you have an Intel graphics card that is integrated into an Intel CPU (known as Intel HD Graphics 4xxx and above), and do **NOT** have a discrete graphics card installed, the Intel graphics driver (which should have been already installed; otherwise your display wouldn't be fully functional) contains the OpenCL driver. 
+
+  > **<font color="red">Important!</font>** The current (as of March 2015) Intel driver contains a bug in calculating ``lgamma``, which is used in MPBNP's Chinese Restaurant Process sampler. Please avoid using the sampler on Intel HD Graphics iGPUs until an updated Intel graphics driver is scheduled to release in June 2015.
 
 * Latest 64-bit version of Python 2.7 (Download the x86-64 installer from [here](https://www.python.org/downloads/release/python-279/))
 
   > When installing Python, be sure to check "Add python.exe to search path".
 
-  After installation is finished, press Windows Key + R and type "cmd" to launch a command prompt. Then type `pip install wheel` to prepare for the next step.
+  After installation is finished, press Windows Key + R and type `cmd` to launch a command prompt. Then type `pip install wheel` to prepare for the next step.
 
 * Latest pre-compiled [numpy](http://www.lfd.uci.edu/~gohlke/pythonlibs/#numpy), [scipy](http://www.lfd.uci.edu/~gohlke/pythonlibs/#scipy), and [pyopencl](http://www.lfd.uci.edu/~gohlke/pythonlibs/#pyopencl) packages for Windows maintained by Christoph Gohlke.
 
   > These compiled packages have the file extension ".whl". Check for the correct version to download. This tutorial assumes you are using 64-bit Python 2.7, for which case you should download the .whl file that mentions "cp27" and "amd64" in its file name.
 
-  Install these downloaded .whl files by ``cd`` into the directory where those files are, and then type ``pip install xxx.whl`` (replace xxx.whl with the actual file name of a wheel file).
+  Install these downloaded .whl files by ``cd`` into the directory where those files are, and then type `pip install xxx.whl` (replace xxx.whl with the actual file name of a wheel file).
 
 You are all set.
 
