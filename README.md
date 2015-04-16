@@ -14,7 +14,7 @@ MPBNP can be used on Windows 7/8/10, Linux and Mac OSX. In the following, we lis
 
 ### Windows 7/8/10 (Recommended - Easy to set up) ###
 
-#### Latest OpenCL drivers ####
+#### OpenCL drivers ####
 
 * If you have an AMD Radeon graphics card, discrete or APU, the graphics driver contains the OpenCL driver. The graphics driver should have been already installed; otherwise your display wouldn't be fully functional. Go to AMD's website for latest drivers.
 
@@ -28,12 +28,12 @@ MPBNP can be used on Windows 7/8/10, Linux and Mac OSX. In the following, we lis
 
   > **Important!** The current (as of March 2015) Intel driver contains a bug in calculating ``lgamma``, which is used in MPBNP's Chinese Restaurant Process sampler. Please avoid using the sampler on Intel HD Graphics iGPUs until an updated Intel graphics driver is scheduled to release in June 2015.
 
-#### Latest 64-bit version of Python 2.7 (Download the x86-64 installer from [here](https://www.python.org/downloads/release/python-279/)) ####
+#### Python 2.7 (Download the x86-64 installer from [here](https://www.python.org/downloads/release/python-279/)) ####
 > When installing Python, be sure to check "Add python.exe to search path".
 
 After installation is finished, press Windows Key + R and type `cmd` to launch a command prompt. Then type `pip install wheel` to prepare for the next step.
 
-#### Latest pre-compiled [numpy](http://www.lfd.uci.edu/~gohlke/pythonlibs/#numpy), [scipy](http://www.lfd.uci.edu/~gohlke/pythonlibs/#scipy), and [pyopencl](http://www.lfd.uci.edu/~gohlke/pythonlibs/#pyopencl) packages for Windows maintained by Christoph Gohlke. ####
+#### Pre-compiled [numpy](http://www.lfd.uci.edu/~gohlke/pythonlibs/#numpy), [scipy](http://www.lfd.uci.edu/~gohlke/pythonlibs/#scipy), and [pyopencl](http://www.lfd.uci.edu/~gohlke/pythonlibs/#pyopencl) packages for Windows maintained by Christoph Gohlke. ####
 
 > These compiled packages have the file extension ".whl". Check for the correct version to download. This tutorial assumes you are using 64-bit Python 2.7, for which case you should download the .whl file that mentions "cp27" and "amd64" in its file name.
 
@@ -45,7 +45,7 @@ You should be all set.
 
 We strongly recommend upgrading to Ubuntu Linux version 15.04 as it comes with updated drivers for OpenCL support.
 
-#### Latest OpenCL drivers ####
+#### OpenCL drivers ####
 
 * If you have an AMD Radeon graphics card, discrete or APU, install the AMD proprietary driver by typing the following into a terminal:
 
@@ -71,13 +71,35 @@ We strongly recommend upgrading to Ubuntu Linux version 15.04 as it comes with u
  
   > Beignet is known to **NOT** work on Ubuntu 14.10. Upgrading to 15.04 is necessary. Beignet is also experimental. In our experience, it sometimes hangs during execution when the same code runs just fine under Windows 7/8/10 on the same hardware (Intel provides the driver for Windows). Please proceed with caution.
 
-#### Latest python 2.7, numpy, scipy, and pyopencl ####
+#### Python 2.7, numpy, scipy, and pyopencl ####
   
 * Installing these components are easy on Ubuntu, just enter the following in a terminal window:
 
   `sudo apt-get install python numpy scipy python-pyopencl`
 
 You should be all set.
+
+### Mac OSX ###
+
+#### OpenCL drivers ####
+
+OpenCL drivers come pre-installed on all Apple computers.
+
+> **Important!** The current Intel driver on Mac OSX contains a bug in calculating ``lgamma``, which is used in MPBNP's Chinese Restaurant Process sampler. Please avoid using the sampler on Intel HD Graphics iGPUs until a fix is release. Unfortunately, we do not know when this fix will be release on Mac OSX.
+
+#### Python 2.7 ####
+
+Python comes pre-installed on all Apple computers. Open a terminal window and then type `pip install wheel` to prepare for the next step.
+
+#### Numpy, scipy, and pyopencl ####
+
+The recommended method for installing these packages is via [Macports](https://www.macports.org/). Please visit Macport's website for instructions on how to install it and obtain these packages.
+
+After these packages are installed, you should be all set.
+
+# Usage #
+
+Examples and tutorials coming soon.
 
 I wish to contact the author for questions, comments and suggestions.
 ---
