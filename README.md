@@ -23,8 +23,7 @@ MPBNP can be used on Windows 7/8/10, Linux and Mac OSX. In the following, we lis
   > nVidia's OpenCL driver supports only their graphics cards.
 
   * If you have an Intel graphics card that is integrated into an Intel CPU (known as Intel HD Graphics 4xxx and above), and do **NOT** have a discrete graphics card installed, the Intel graphics driver (which should have been already installed; otherwise your display wouldn't be fully functional) contains the OpenCL driver. 
-
-  > **<font color="red">Important!</font>** The current (as of March 2015) Intel driver contains a bug in calculating ``lgamma``, which is used in MPBNP's Chinese Restaurant Process sampler. Please avoid using the sampler on Intel HD Graphics iGPUs until an updated Intel graphics driver is scheduled to release in June 2015.
+  <font color="red"> **Important!** The current (as of March 2015) Intel driver contains a bug in calculating ``lgamma``, which is used in MPBNP's Chinese Restaurant Process sampler. Please avoid using the sampler on Intel HD Graphics iGPUs until an updated Intel graphics driver is scheduled to release in June 2015.</font>
 
 * Latest 64-bit version of Python 2.7 (Download the x86-64 installer from [here](https://www.python.org/downloads/release/python-279/))
 
@@ -38,27 +37,12 @@ MPBNP can be used on Windows 7/8/10, Linux and Mac OSX. In the following, we lis
 
   Install these downloaded .whl files by ``cd`` into the directory where those files are, and then type `pip install xxx.whl` (replace xxx.whl with the actual file name of a wheel file).
 
-You are all set.
+You should be all set.
 
-What's "OpenCL-accelerated"?
----
-Performing inferences for Bayesian nonparametric models can be quite slow due to the sheer number of calculations needed. MPBNP samplers implement the core inference procedures in OpenCL, which accelerates the computational process by utilizing multi-core CPUs and GPUs. Besides the OpenCL parts, MPBNP is  written in Python 2 so that you don't have to be a programming guru to understand what it does.
+### Ubuntu Linux 15.04 64-bit ###
 
-Cool. How faster is it?
----
-You can do your own benchmarking using the tools that come with the package. In our experience, the core computation part (time spent on writing the data to the hard disk, for example, is not considered) can be 50X faster than a C-based sampler using the same algorithm. If you typically code up your sampler in Python or R, the speedup will be even more significant.
+We recommend upgrading to Ubuntu Linux version 15.04 as it comes with updated drivers for OpenCL support.
 
-I don't know much about programming. Just show me how to use it.
----
-Sure. We will provide a tutorial shortly. But if you have on your operating system:
-
-* Python 2.7 or greater (No Python 3 support yet)
-* pyopencl 2013.2 or greater
-* AMD, nvidia, or Intel driver for OpenCL support (depending on what hardware you have)
-
-then you should be able to run the samplers right out of the box. 
-
-Don't worry if this seems overwhelming - we will write detailed tutorials on how to obtain these software programs soon!
 
 I wish to contact the author for questions, comments and suggestions.
 ---
