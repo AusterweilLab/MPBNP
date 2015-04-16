@@ -14,28 +14,30 @@ MPBNP can be used on Windows 7/8/10, Linux and Mac OSX. In the following, we lis
 
 ### Windows 7/8/10 (Recommended - Easy to set up) ###
 
-* Latest OpenCL drivers
+#### Latest OpenCL drivers ####
 
-  * If you have an AMD Radeon graphics card, discrete or APU, the graphics driver (which should have been already installed; otherwise your display wouldn't be fully functional) contains the OpenCL driver. 
-  > AMD's OpenCL driver supports running OpenCL code on both their graphics cards (GPUs), and any x86 CPUs (AMD or Intel).
+* If you have an AMD Radeon graphics card, discrete or APU, the graphics driver (which should have been already installed; otherwise your display wouldn't be fully functional) contains the OpenCL driver. 
 
-  * If you have an nVidia graphics card, the graphics driver (which should have been already installed; otherwise your display wouldn't be fully functional) contains the OpenCL driver. 
-  > nVidia's OpenCL driver supports only their graphics cards.
+> AMD's OpenCL driver supports running OpenCL code on both their graphics cards (GPUs), and any x86 CPUs (AMD or Intel).
 
-  * If you have an Intel graphics card that is integrated into an Intel CPU (known as Intel HD Graphics 4xxx and above), and do **NOT** have a discrete graphics card installed, the Intel graphics driver (which should have been already installed; otherwise your display wouldn't be fully functional) contains the OpenCL driver. 
-  > **Important!** The current (as of March 2015) Intel driver contains a bug in calculating ``lgamma``, which is used in MPBNP's Chinese Restaurant Process sampler. Please avoid using the sampler on Intel HD Graphics iGPUs until an updated Intel graphics driver is scheduled to release in June 2015.
+* If you have an nVidia graphics card, the graphics driver (which should have been already installed; otherwise your display wouldn't be fully functional) contains the OpenCL driver. 
 
-* Latest 64-bit version of Python 2.7 (Download the x86-64 installer from [here](https://www.python.org/downloads/release/python-279/))
+> nVidia's OpenCL driver supports only their graphics cards.
 
-  > When installing Python, be sure to check "Add python.exe to search path".
+* If you have an Intel graphics card that is integrated into an Intel CPU (known as Intel HD Graphics 4xxx and above), and do **NOT** have a discrete graphics card installed, the Intel graphics driver (which should have been already installed; otherwise your display wouldn't be fully functional) contains the OpenCL driver. 
 
-  After installation is finished, press Windows Key + R and type `cmd` to launch a command prompt. Then type `pip install wheel` to prepare for the next step.
+> **Important!** The current (as of March 2015) Intel driver contains a bug in calculating ``lgamma``, which is used in MPBNP's Chinese Restaurant Process sampler. Please avoid using the sampler on Intel HD Graphics iGPUs until an updated Intel graphics driver is scheduled to release in June 2015.
 
-* Latest pre-compiled [numpy](http://www.lfd.uci.edu/~gohlke/pythonlibs/#numpy), [scipy](http://www.lfd.uci.edu/~gohlke/pythonlibs/#scipy), and [pyopencl](http://www.lfd.uci.edu/~gohlke/pythonlibs/#pyopencl) packages for Windows maintained by Christoph Gohlke.
+#### Latest 64-bit version of Python 2.7 (Download the x86-64 installer from [here](https://www.python.org/downloads/release/python-279/)) ####
+> When installing Python, be sure to check "Add python.exe to search path".
 
-  > These compiled packages have the file extension ".whl". Check for the correct version to download. This tutorial assumes you are using 64-bit Python 2.7, for which case you should download the .whl file that mentions "cp27" and "amd64" in its file name.
+After installation is finished, press Windows Key + R and type `cmd` to launch a command prompt. Then type `pip install wheel` to prepare for the next step.
 
-  Install these downloaded .whl files by ``cd`` into the directory where those files are, and then type `pip install xxx.whl` (replace xxx.whl with the actual file name of a wheel file).
+#### Latest pre-compiled [numpy](http://www.lfd.uci.edu/~gohlke/pythonlibs/#numpy), [scipy](http://www.lfd.uci.edu/~gohlke/pythonlibs/#scipy), and [pyopencl](http://www.lfd.uci.edu/~gohlke/pythonlibs/#pyopencl) packages for Windows maintained by Christoph Gohlke. ####
+
+> These compiled packages have the file extension ".whl". Check for the correct version to download. This tutorial assumes you are using 64-bit Python 2.7, for which case you should download the .whl file that mentions "cp27" and "amd64" in its file name.
+
+Install these downloaded .whl files by ``cd`` into the directory where those files are, and then type `pip install xxx.whl` (replace xxx.whl with the actual file name of a wheel file).
 
 You should be all set.
 
@@ -43,37 +45,37 @@ You should be all set.
 
 We strongly recommend upgrading to Ubuntu Linux version 15.04 as it comes with updated drivers for OpenCL support.
 
-* Latest OpenCL drivers
+#### Latest OpenCL drivers ####
 
-  * If you have an AMD Radeon graphics card, discrete or APU, install the AMD proprietary driver by typing the following into a terminal:
+* If you have an AMD Radeon graphics card, discrete or APU, install the AMD proprietary driver by typing the following into a terminal:
 
-		sudo apt-get install fglrx
+`sudo apt-get install fglrx`
     
-    and follow on-screen instructions. **A reboot is required after installation.** The graphics driver contains the OpenCL driver for AMD GPUs and x86 CPUs (both AMD and Intel).
+and follow on-screen instructions. **A reboot is required after installation.** The graphics driver contains the OpenCL driver for AMD GPUs and x86 CPUs (both AMD and Intel).
 
-  > To fine-tune driver version and advanced installation options, please see the instructions on this [page](https://help.ubuntu.com/community/BinaryDriverHowto/AMD). 
+> To fine-tune driver version and advanced installation options, please see the instructions on this [page](https://help.ubuntu.com/community/BinaryDriverHowto/AMD). 
 
-  * If you have an nvidia graphics card, install the nvidia proprietary driver by typing the following into a terminal:
+* If you have an nvidia graphics card, install the nvidia proprietary driver by typing the following into a terminal:
 
-		sudo apt-get install nvidia-current
+`sudo apt-get install nvidia-current`
 
-    and follow on-screen instructions. **A reboot is required after installation.** The graphics driver contains the OpenCL driver for nvidia graphics cards.
+and follow on-screen instructions. **A reboot is required after installation.** The graphics driver contains the OpenCL driver for nvidia graphics cards.
 
-  > Note: if both CUDA and OpenCL need to be maintained, please pay extra attention to the dependency warnings during installation. Prior to 15.04, it is known that only the proprietary driver **directly downloaded* from nvidia's website can simultaneously support OpenCL and CUDA. However, the downloaded driver requires re-installation every time the Ubuntu kernel is updated, which is quite a hassle. Please use your own judgements for the best configuration.
+> Note: if both CUDA and OpenCL need to be maintained, please pay extra attention to the dependency warnings during installation. Prior to 15.04, it is known that only the proprietary driver **directly downloaded* from nvidia's website can simultaneously support OpenCL and CUDA. However, the downloaded driver requires re-installation every time the Ubuntu kernel is updated, which is quite a hassle. Please use your own judgements for the best configuration.
 
-  * If you have an Intel graphics card that is integrated into an Intel CPU (known as Intel HD Graphics 4xxx and above), and do **NOT** have a discrete graphics card installed, the situation is a bit tricky. Intel does not provide an official OpenCL driver for Linux. However, there is an open-source project called *beignet* backed by Intel employees, which fortunately can be installed directly from Ubuntu repositories. Type
+* If you have an Intel graphics card that is integrated into an Intel CPU (known as Intel HD Graphics 4xxx and above), and do **NOT** have a discrete graphics card installed, the situation is a bit tricky. Intel does not provide an official OpenCL driver for Linux. However, there is an open-source project called *beignet* backed by Intel employees, which fortunately can be installed directly from Ubuntu repositories. Type
 
-		sudo apt-get install beignet
+`sudo apt-get install beignet`
 
-    into the terminal. This should do the trick.
+into the terminal. This should do the trick.
  
-  > Beignet is known to **NOT** work on Ubuntu 14.10. Upgrading to 15.04 is necessary. Beignet is also experimental. In our experience, it sometimes hangs during execution when the same code runs just fine under Windows 7/8/10 on the same hardware (Intel provides the driver for Windows). Please proceed with caution.
+> Beignet is known to **NOT** work on Ubuntu 14.10. Upgrading to 15.04 is necessary. Beignet is also experimental. In our experience, it sometimes hangs during execution when the same code runs just fine under Windows 7/8/10 on the same hardware (Intel provides the driver for Windows). Please proceed with caution.
 
-* Latest python 2.7, numpy, scipy, and pyopencl
+#### Latest python 2.7, numpy, scipy, and pyopencl ####
   
-  * Installing these components are easy on Ubuntu, just enter the following in a terminal window:
+* Installing these components are easy on Ubuntu, just enter the following in a terminal window:
 
-		sudo apt-get install python numpy scipy python-pyopencl
+`sudo apt-get install python numpy scipy python-pyopencl`
 
 You should be all set.
 
