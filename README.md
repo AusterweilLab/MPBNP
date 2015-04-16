@@ -10,7 +10,7 @@ MPBNP is started by the Austerweil Lab in the Department of Cognitive, Linguisti
 
 ## Prerequisites ##
 
-MPBNP can be used on Windows 7/8/10, Linux and Mac OSX. In the following, we list the prerequisites for using MPBNP on each operating system.
+MPBNP can be used on Windows 7/8/10, Linux and Mac OSX. In the following, we list the prerequisites for using MPBNP on each operating system. All following instructions apply to both desktop/workstation and laptop computers.
 
 ### Windows 7/8/10 (Recommended - Easy to set up) ###
 
@@ -23,7 +23,7 @@ MPBNP can be used on Windows 7/8/10, Linux and Mac OSX. In the following, we lis
   > nVidia's OpenCL driver supports only their graphics cards.
 
   * If you have an Intel graphics card that is integrated into an Intel CPU (known as Intel HD Graphics 4xxx and above), and do **NOT** have a discrete graphics card installed, the Intel graphics driver (which should have been already installed; otherwise your display wouldn't be fully functional) contains the OpenCL driver. 
-  <font color="red"> **Important!** The current (as of March 2015) Intel driver contains a bug in calculating ``lgamma``, which is used in MPBNP's Chinese Restaurant Process sampler. Please avoid using the sampler on Intel HD Graphics iGPUs until an updated Intel graphics driver is scheduled to release in June 2015.</font>
+  > **Important!** The current (as of March 2015) Intel driver contains a bug in calculating ``lgamma``, which is used in MPBNP's Chinese Restaurant Process sampler. Please avoid using the sampler on Intel HD Graphics iGPUs until an updated Intel graphics driver is scheduled to release in June 2015.
 
 * Latest 64-bit version of Python 2.7 (Download the x86-64 installer from [here](https://www.python.org/downloads/release/python-279/))
 
@@ -39,10 +39,43 @@ MPBNP can be used on Windows 7/8/10, Linux and Mac OSX. In the following, we lis
 
 You should be all set.
 
-### Ubuntu Linux 15.04 64-bit ###
+### Ubuntu Linux 15.04 64-bit (Recommended for production purposes) ###
 
-We recommend upgrading to Ubuntu Linux version 15.04 as it comes with updated drivers for OpenCL support.
+We strongly recommend upgrading to Ubuntu Linux version 15.04 as it comes with updated drivers for OpenCL support.
 
+* Latest OpenCL drivers
+
+  * If you have an AMD Radeon graphics card, discrete or APU, install the AMD proprietary driver by typing the following into a terminal:
+
+	sudo apt-get install fglrx
+    
+    and follow on-screen instructions. The graphics driver contains the OpenCL driver for AMD GPUs and x86 CPUs (both AMD and Intel).
+
+  > To fine-tune driver version and advanced installation options, please see the instructions on this [page](https://help.ubuntu.com/community/BinaryDriverHowto/AMD). 
+
+  * If you have an nvidia graphics card, install the nvidia proprietary driver by typing the following into a terminal:
+
+	sudo apt-get install nvidia-current
+
+    and follow on-screen instructions. The graphics driver contains the OpenCL driver for nvidia graphics cards.
+
+  > Note: if both CUDA and OpenCL need to be maintained, please pay extra attention to the dependency warnings during installation. Prior to 15.04, it is known that only the proprietary driver **directly downloaded* from nvidia's website can simultaneously support OpenCL and CUDA. However, the downloaded driver requires re-installation every time the Ubuntu kernel is updated, which is quite a hassle. Please use your own judgements for the best configuration.
+
+  * If you have an Intel graphics card that is integrated into an Intel CPU (known as Intel HD Graphics 4xxx and above), and do **NOT** have a discrete graphics card installed, you are out of luck. Intel does not provide an official OpenCL driver for Linux. However, there is an open-source project called *beignet* backed by Intel employees, which fortunately can be installed directly from Ubuntu repositories. Type
+
+	sudo apt-get install beignet
+
+    into the terminal. This should do the trick.
+ 
+  > Beignet is known to **NOT** work on Ubuntu 14.10. Upgrading to 15.04 is necessary. 
+
+* Latest python 2.7, numpy, scipy, and pyopencl
+  
+  * Installing these components are easy on Ubuntu, just enter the following in a terminal window:
+
+	sudo apt-get install python numpy scipy python-pyopencl
+
+You should be all set.
 
 I wish to contact the author for questions, comments and suggestions.
 ---
