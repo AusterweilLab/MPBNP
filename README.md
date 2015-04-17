@@ -8,6 +8,8 @@ MPBNP is started by the Austerweil Lab in the Department of Cognitive, Linguisti
 
 # Installation #
 
+To obtain MPBNP, simply clone the git repository, or if you have no idea what that means, [download here](https://github.com/tqian86/MPBNP/archive/master.zip). To run MPBNP, please make sure that all prerequisites are installed on your computer, as described below.
+
 ## Prerequisites ##
 
 MPBNP can be used on Windows 7/8/10, Linux and Mac OSX. In the following, we list the prerequisites for using MPBNP on each operating system. All following instructions apply to both desktop/workstation and laptop computers.
@@ -85,7 +87,7 @@ You should be all set.
 
 OpenCL drivers come pre-installed on all Apple computers.
 
-> **Important!** The current Intel driver on Mac OSX contains a bug in calculating ``lgamma``, which is used in MPBNP's Chinese Restaurant Process sampler. Please avoid using the sampler on Intel HD Graphics iGPUs until a fix is release. Unfortunately, we do not know when this fix will be release on Mac OSX.
+> **Important!** The current Intel driver on Mac OSX contains a bug in calculating ``lgamma``, which is used in MPBNP's Chinese Restaurant Process sampler. Please avoid using the sampler on Intel HD Graphics iGPUs until a fix is released. Unfortunately, we do not know when this fix will be released on Mac OSX.
 
 #### Python 2.7 ####
 
@@ -99,7 +101,58 @@ After these packages are installed, you should be all set.
 
 # Usage #
 
-Examples and tutorials coming soon.
+Samplers in MPBNP can be invoked by executing one of the `SamplingUtility.py` program in the base directory of MPBNP. For example, to run the Chinese Restaurant Process Mixture Model sampler, look for `CRPSamplingUtility.py`. For the Indian Buffet Process sampler, look for `IBPSamplingUtility.py'.
+
+Each sampling utility follows a shared standard of parameters and arguments. There is no need to remember these parameters and arguments - when in doubt, simply run a sampling utility with the argument `--help` as in `python CRPSamplingUtility.py --help`. It will print out a detailed help message on all acceptable arguments:
+
+```
+$ python CRPSamplingUtility.py --help
+usage: CRPSamplingUtility.py [-h] [--opencl] [--opencl_device {ask,gpu,cpu}]
+                             --data_file DATA_FILE
+                             [--kernel {gaussian,categorical}] [--iter ITER]
+                             [--burnin BURNIN] [--output_mode {best,all}]
+                             [--output_to_file] [--output_to_stdout]
+                             [--chain CHAIN] [--distributed_chains]
+
+A sampler for the Chinese Restaurant Process mixture model with and without
+OpenCL support. Please contact Ting Qian <ting_qian@brown.edu> for questions
+and feedback.
+
+optional arguments:
+  -h, --help            show this help message and exit
+  --opencl              Use OpenCL acceleration
+  --opencl_device {ask,gpu,cpu}
+                        The device to use OpenCL acceleration on. Default
+                        behavior is asking the user (i.e., you).
+  --data_file DATA_FILE
+  --kernel {gaussian,categorical}
+                        The distribution of each component. Default is
+                        gaussian/normal. Also supports categorical
+                        distributions
+  --iter ITER, -t ITER  The number of iterations the sampler should run. When
+                        only the best sample is recorded, this parameter is
+                        interpreted as the maximum number of iterations the
+                        sampler will run.
+  --burnin BURNIN, -b BURNIN
+                        The number of iterations discarded as burn-in.
+  --output_mode {best,all}
+                        Output mode. Default is keeping only the sample that
+                        yields the highest logliklihood of data. The other
+                        option is to keep all samples.
+  --output_to_file      Write posterior samples to a log file in the current
+                        directory. Default behavior is not keeping records of
+                        posterior samples
+  --output_to_stdout    Write posterior samples to standard output (i.e., your
+                        screen). Default behavior is not keeping records of
+                        posterior samples
+  --chain CHAIN, -c CHAIN
+                        The number of chains to run. Default is 1.
+  --distributed_chains  If there are multiple OpenCL devices, distribute
+                        chains across them. Default is no. Will not distribute
+                        to CPUs if GPU is specified in opencl_device, and vice
+                        versa
+```
+
 
 I wish to contact the author for questions, comments and suggestions.
 ---
