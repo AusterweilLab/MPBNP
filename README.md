@@ -85,17 +85,21 @@ You should be all set.
 
 #### OpenCL drivers ####
 
-OpenCL drivers come pre-installed on all Apple computers.
+OpenCL drivers are usually pre-installed on all Apple computers.
 
 > **Important!** The current Intel driver on Mac OSX contains a bug in calculating ``lgamma``, which is used in MPBNP's Chinese Restaurant Process sampler. Please avoid using the sampler on Intel HD Graphics iGPUs until a fix is released. Unfortunately, we do not know when this fix will be released on Mac OSX.
 
 #### Python 2.7 ####
 
-Python comes pre-installed on all Apple computers. Open a terminal window and then type `pip install wheel` to prepare for the next step.
+Python is pre-installed on all Apple computers. 
 
 #### Numpy, scipy, and pyopencl ####
 
-The recommended method for installing these packages is via [Macports](https://www.macports.org/). Please visit Macport's website for instructions on how to install it and obtain these packages.
+Both *numpy* and *scipy* are pre-installed on Apple computers upgraded to Mac OSX 10.10. To determine if *numpy* or *scipy* is installed on computers with earlier versions of Mac OSX, open a terminal window and type `python` at the command prompt. Then, try `import numpy` and `import numpy` - if any of these import commands produces an error, then the corresponding package is NOT installed on your computer. 
+
+The recommended method for installing numpy, scipy and pyopencl is via [Macports](https://www.macports.org/). Please visit Macport's website for instructions on how to install it and obtain these packages.
+
+You may also follow the [installation tutorial provided by PyOpenCL](http://wiki.tiker.net/PyOpenCL/Installation/Mac) if Macports looks too complicated to set up.
 
 After these packages are installed, you should be all set.
 
@@ -152,6 +156,92 @@ optional arguments:
                         to CPUs if GPU is specified in opencl_device, and vice
                         versa
 ```
+
+> Note: despite what the help message claims, distributing chains across multiple OpenCL devices is not yet implemented. The feature is planned for future releases. 
+
+## Chinese Restaurant Process (CRP) Sampler ##
+
+The Chinese Restaurant Process Sampler can be invoked by running the `CRPSamplingUtility.py` with options from above.
+
+To give you an idea, here's an example:
+
+`$ python CRPSamplingUtility --data_file ./data/normal-1d.csv --output_to_stdout --opencl`
+
+### Prepare the input data ###
+
+The CRP sampler expects the input data to be in a [Comma-separated Values](http://en.wikipedia.org/wiki/Comma-separated_values) (.csv) format. A header line is also expected. For example, the following is a perfectly fine input data set:
+
+```
+V1
+1.1
+2.2
+3.3
+```
+
+### Choose what arguments to list ###
+
+In this example, we perform posterior inference on class labels of data points in the `normal-1d.csv` input file, assuming that each mixture component can be represented by a normal distribution. The CRP sampler also supports category distributions (also known as a discrete distribution) as the distribution of mixture components (switching to categorical is done by specifying `--kernel categorical`). The prior distribution on class labels is the Chinese Restaurant Process prior. We specify the input file using the argument `--data_file`, followed by the path to the input file (`normal-1d.csv` is a toy data set that comes with MPBNP). We request that the final output, i.e., the class labels of data points, be printed to standard output, which is just the screen. Finally, we use OpenCL acceleration by specifying the `--opencl` argument.
+
+Implicit in this command is the *output mode* of the sampler, which determines how much information is recorded by the sampler. By default, the sampler is run in the *best* output mode, where the sampler discards all previous samples except for the one that produces the largest joint log probability of model and data. In other words, the *best* sample that will be recorded in the end represents the optimal tradeoff between fitness and model complexity. You can also choose to keep all samples (subject to thining and burning) that are produced in the sampling process, by specifying `--output_mode all`.
+
+### Choose what OpenCL device to use
+
+If you run the command above, you'll probably see something similar to the following:
+
+```
+Choose platform:
+[0] <pyopencl.Platform 'Intel(R) OpenCL' at 0x39c890>
+[1] <pyopencl.Platform 'AMD Accelerated Parallel Processing' at 0x7ffe9107ad30>
+Choice [0]:
+```
+
+On my computer, I am asked to choose among multiple OpenCL **platforms** first because I have installed both Intel and AMD's drivers for OpenCL devices. If there is only one platform (e.g., NVIDIA's driver) installed, then you won't see this question. When there are multiple platforms, choosing a platform may lead to another set of choices:
+
+```
+Choose device(s):
+[0] <pyopencl.Device 'Bonaire' on 'AMD Accelerated Parallel Processing' at 0x12a04840>
+[1] <pyopencl.Device 'Intel(R) Core(TM) i3-4130T CPU @ 2.90GHz' on 'AMD Accelerated Parallel Processing' at 0x16c3da70>
+Choice, comma-separated [0]:
+```
+
+Here I can select which **device** to be used for this particular sampling procedure. The first device *Bonaire* is an AMD GPU and the second device is an Intel CPU, both of which are supported by the AMD driver. Similarly, if there's only one device supported by a platform/driver, you won't see this question. 
+
+Platforms and devices vary from computers to computers and you'll probably see something different from the example here. In general, for small-ish data sets (with data points fewer than 5K), it may actually be faster to use the CPU.
+
+### Interpret the result ###
+
+Continuing the example, let's suppose that I have chosen the *Bonaire* GPU to run the task. In a few seconds, the sampler will complete and print some information during and after the run. You may see something similar to this:
+
+```
+Chain 1 running, please wait ...
+0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,148,149,150,151,152,153,154,155,156,157,158,159,160,161,162,163,164,165,166,167,168,169,170,171,172,173,174,175,176,177,178,179,180,181,182,183,184,185,186,187,188,189,190,191,192,193,194,195,196,197,198,199
+New best sample found, loglik: -1082.82495117
+New best sample found, loglik: -1078.32983398
+New best sample found, loglik: -1060.10217285
+New best sample found, loglik: -1017.8203125
+New best sample found, loglik: -958.890075684
+...
+[many lines omitted]
+...
+New best sample found, loglik: -539.621154785
+New best sample found, loglik: -539.24621582
+New best sample found, loglik: -539.126953125
+New best sample found, loglik: -539.058837891
+New best sample found, loglik: -538.669555664
+Too little improvement in loglikelihood - Abort searching
+6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,1,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,1,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1
+Chain 1 finished. OpenCL device time: 3.860003; Total_time: 4.334000 seconds
+```
+
+This output combines both debug messages and the final output. The debug messages show the progress of the sampler, as the log probability of model and data decrease monotonically over the course of the run. The sampler intelligently stops when there is too little improvement for a sustained period of iterations. The final line of debug messages shows how much time it took to run the sampler. Here we can see the *Bonaire* GPU spent 3.86 seconds on various numerical calculations (which is not fast - the advantage of GPU computing is usually only evident when the data is really large).
+
+The final output are the two lines consisting of numbers, one before the debug messages and one after the debug messages. The first line indexes the data points, and thus ranges from 0 to 199, covering the 200 data points in this example. The second line indexes the class label of each data point. Data points with `6` as its label are in the same cluster. The numerical differences between the names of class labels are arbitrary (i.e., a `6` data point is not more superior to a `1` data point in any sense). 
+
+Given these class labels, one can easily proceed to extract the means, variances and other statistics of interest for each class / category of data points. 
+
+## Indian Buffet Process Sampler ##
+
+## Transformed Indian Buffet Process Sampler ##
 
 
 I wish to contact the author for questions, comments and suggestions.
