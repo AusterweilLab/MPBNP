@@ -59,11 +59,11 @@ We strongly recommend upgrading to Ubuntu Linux version 15.04 as it comes with u
 
 * If you have an nvidia graphics card, install the nvidia proprietary driver by typing the following into a terminal:
 
-  `sudo apt-get install nvidia-current`
+  `sudo apt-get install nvidia-346`
 
   and follow on-screen instructions. **A reboot is required after installation.** The graphics driver contains the OpenCL driver for nvidia graphics cards.
 
-  > Note: if both CUDA and OpenCL need to be maintained, please pay extra attention to the dependency warnings during installation. Prior to 15.04, it is known that only the proprietary driver *directly downloaded* from nvidia's website can simultaneously support OpenCL and CUDA. However, the downloaded driver requires re-installation every time the Ubuntu kernel is updated, which is quite a hassle. Please use your own judgements for the best configuration.
+  > Note: `nvidia-346` is only available in 15.04. Prior to 15.04, if you only need OpenCL support, try install `nvidia-current`; if you need both CUDA and OpenCL, it is known that only the proprietary driver *directly downloaded* from nvidia's website can simultaneously support OpenCL and CUDA. However, the downloaded driver requires re-installation every time the Ubuntu kernel is updated, which is quite a hassle. Please use your own judgements for the best configuration.
 
 * If you have an Intel graphics card that is integrated into an Intel CPU (known as Intel HD Graphics 4xxx and above), and do **NOT** have a discrete graphics card installed, the situation is a bit tricky. Intel does not provide an official OpenCL driver for Linux. However, there is an open-source project called *beignet* backed by Intel employees, which fortunately can be installed directly from Ubuntu repositories. Type
 
