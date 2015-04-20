@@ -12,7 +12,7 @@ To obtain MPBNP, simply clone the git repository, or if you have no idea what th
 
 ## Prerequisites ##
 
-MPBNP can be used on Windows 7/8/10, Linux and Mac OSX. In the following, we list the prerequisites for using MPBNP on each operating system. All following instructions apply to both desktop/workstation and laptop computers.
+MPBNP can be used on Windows 7/8/10, Linux and Mac OSX, with OpenCL support >= 1.1. In the following, we list the prerequisites for using MPBNP on each operating system. All following instructions apply to both desktop/workstation and laptop computers.
 
 ### Windows 7/8/10 (Recommended - Easy to set up) ###
 
@@ -63,7 +63,7 @@ We strongly recommend upgrading to Ubuntu Linux version 15.04 as it comes with u
 
   and follow on-screen instructions. **A reboot is required after installation.** The graphics driver contains the OpenCL driver for nvidia graphics cards.
 
-  > Note: `nvidia-346` is only available in 15.04. Prior to 15.04, if you only need OpenCL support, try install `nvidia-current`; if you need both CUDA and OpenCL, it is known that only the proprietary driver *directly downloaded* from nvidia's website can simultaneously support OpenCL and CUDA. However, the downloaded driver requires re-installation every time the Ubuntu kernel is updated, which is quite a hassle. Please use your own judgements for the best configuration.
+  > Note: In most cases, installing `nvidia-346` should enable both CUDA and OpenCL support successfully. The driver should support a range of nvidia devices, including GeForce, Quadro, and Tesla cards. However, if you have previously installed the proprietary driver *directly downloaded* from nvidia's website, chances are that `nvidia-346` won't work and you will have to stick to the [nvidia's driver](http://www.nvidia.com/Download/index.aspx?lang=en-us).
 
 * If you have an Intel graphics card that is integrated into an Intel CPU (known as Intel HD Graphics 4xxx and above), and do **NOT** have a discrete graphics card installed, the situation is a bit tricky. Intel does not provide an official OpenCL driver for Linux. However, there is an open-source project called *beignet* backed by Intel employees, which fortunately can be installed directly from Ubuntu repositories. Type
 
