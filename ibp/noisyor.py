@@ -217,7 +217,7 @@ class Gibbs(BaseSampler):
         sampled new ks.)
         """
         N = float(len(self.obs))
-        old_loglik = self._loglik(cur_y, cur_z)
+        #old_loglik = self._loglik(cur_y, cur_z)
 
         k_new_count = np.random.poisson(self.alpha / N)
         if k_new_count == 0: return False
