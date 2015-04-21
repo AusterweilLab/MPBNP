@@ -90,8 +90,8 @@ class BaseSampler(object):
         """Read data from a csv file.
         """
         # determine if the type file is gzip
-        filetype, _ = mimetypes.guess_type(filepath)
-        if filetype == 'gzip':
+        filetype, encoding = mimetypes.guess_type(filepath)
+        if encoding == 'gzip':
             csvfile = gzip.open(filepath, 'r')
         else:
             csvfile = open(filepath, 'r')
