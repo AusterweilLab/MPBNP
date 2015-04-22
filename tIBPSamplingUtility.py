@@ -46,6 +46,12 @@ parser.add_argument('--distributed_chains', action='store_true', default=False, 
 
 # parse and print out the arguments
 args = parser.parse_args()
+
+# check for imcompatibilities
+if args.output_mode == 'all' and args.output_to_stdout:
+    print('Recording all samples is chosen, but printing to screen is also selected. This is not recommended.', file=sys.stderr)
+    sys.exit(0)
+
 print_args_summary(args)
 
 # parse the name of the input file and set up output file path
@@ -67,9 +73,9 @@ for chain in xrange(args.chain):
     # set up the output file
     if args.output_to_file: 
         if args.opencl:
-            sample_dest = output_path + input_filename + '-%d-%s-chain-%d-cl.pickled' % (args.iter - args.burnin, args.kernel, chain + 1)
+            sample_dest = output_path + input_filename + '-%d-%s-%s-chain-%d-cl/' % (args.iter - args.burnin, args.kernel, args.output_mode, chain + 1)
         else:
-            sample_dest = output_path + input_filename + '-%d-%s-chain-%d-nocl.pickled' % (args.iter - args.burnin, args.kernel, chain + 1)
+            sample_dest = output_path + input_filename + '-%d-%s-%s-chain-%d-nocl/' % (args.iter - args.burnin, args.kernel, args.output_mode, chain + 1)
     elif args.output_to_stdout:
         sample_dest = sys.stdout
     else:

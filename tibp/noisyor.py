@@ -2,7 +2,7 @@
 #-*- coding: utf-8 -*-
 
 from __future__ import print_function, division
-import sys, os.path, itertools, cPickle
+import sys, os, os.path, itertools
 pkg_dir = os.path.dirname(os.path.realpath(__file__)) + '/../../'
 sys.path.append(pkg_dir)
 
@@ -97,11 +97,70 @@ class Gibbs(BaseSampler):
             assert(init_r is None)
 
         if self.cl_mode:
-            return self._cl_infer_yzr(init_y, init_z, init_r, output_file)
+            timing_stats = self._cl_infer_yzr(init_y, init_z, init_r)
         else:
-            return self._infer_yzr(init_y, init_z, init_r, output_file)
+            timing_stats = self._infer_yzr(init_y, init_z, init_r)
 
-    def _infer_yzr(self, init_y, init_z, init_r, output_file):
+        # report the results
+        if output_file is sys.stdout:
+            if self.record_best:
+                final_y, final_z, final_r = self.best_sample[0]
+                num_of_feats = final_z.shape[1]
+                print('parameter,value',
+                      'alpha,%f' % self.alpha, 'lambda,%f' % self.lam, 'theta,%f' % self.theta,
+                      'epislon,%f' % self.epislon, 'phi,%f' % self.phi, 'inferred_K,%d' % num_of_feats,
+                      file = output_file, sep = '\n')
+                
+                np.savetxt(output_file, final_z, fmt="%d", comments='', delimiter=',',
+                           header=','.join(['feature%d' % _ for _ in range(num_of_feats)]))
+
+                for k in xrange(num_of_feats):
+                    np.savetxt(output_file, final_y[k].reshape(self.img_w, self.img_h),
+                               fmt="%d", delimiter=',')
+
+                print('object', 'feature', 'v_scale', 'h_scale', 'v_translation', 'h_translation',
+                      file=output_file, sep=',')
+                for n in xrange(self.N):
+                    for k in xrange(num_of_feats):
+                        print(n, k, *final_r[n,k], file=output_file, sep=',')
+        else:
+            if self.record_best:
+                final_y, final_z, final_r = self.best_sample[0]
+                num_of_feats = final_z.shape[1]
+                os.mkdir(output_file)
+                print('parameter,value',
+                      'alpha,%f' % self.alpha, 'lambda,%f' % self.lam, 'theta,%f' % self.theta,
+                      'epislon,%f' % self.epislon, 'phi,%f' % self.phi, 'inferred_K,%d' % num_of_feats,
+                      file = gzip.open(output_file + 'parameters.csv.gz', 'w'), sep = '\n')
+                
+                np.savetxt(gzip.open(output_file + 'feature_ownership.csv.gz', 'w'), final_z,
+                           fmt="%d", comments='', delimiter=',',
+                           header=','.join(['feature%d' % _ for _ in range(num_of_feats)]))
+
+                for k in xrange(num_of_feats):
+                    np.savetxt(gzip.open(output_file + 'feature_%d_image.csv.gz' % k, 'w'),
+                               final_y[k].reshape(self.img_w, self.img_h), fmt="%d", delimiter=',')
+
+                transform_fp = gzip.open(output_file + 'transformations.csv.gz', 'w')
+                print('object', 'feature', 'v_scale', 'h_scale', 'v_translation', 'h_translation',
+                      file = transform_fp, sep=',')
+                for n in xrange(self.N):
+                    for k in xrange(num_of_feats):
+                        print(n, k, *final_r[n,k], file=transform_fp, sep=',')
+                transform_fp.close()
+            else:
+                os.mkdir(output_file)
+                print('parameter,value',
+                      'alpha,%f' % self.alpha, 'lambda,%f' % self.lam, 'theta,%f' % self.theta,
+                      'epislon,%f' % self.epislon, 'phi,%f' % self.phi, 
+                      file = gzip.open(output_file + 'parameters.csv.gz', 'w'), sep = '\n')
+                np.savez_compressed(output_file + 'feature_ownership.npz', self.samples['z'])
+                np.savez_compressed(output_file + 'feature_images.npz', self.samples['y'])
+                np.savez_compressed(output_file + 'transformations.npz', self.samples['r'])
+
+        return timing_stats
+
+    def _infer_yzr(self, init_y, init_z, init_r):
         """Wrapper function to start the inference on y, z and r.
         This function is not supposed to directly invoked by an end user.
         @param init_y: Passed in from do_inference()
@@ -130,17 +189,6 @@ class Gibbs(BaseSampler):
                 self.samples['z'].append(cur_z)
                 self.samples['y'].append(cur_y)
                 self.samples['r'].append(cur_r)
-
-        if output_file is not None:
-            if self.record_best:
-                # print out the Y matrix
-                final_y, final_z, final_r = self.best_sample[0]
-                hyper_pram = [self.alpha, self.lam, self.theta, self.epislon]
-                print(final_z.shape[1], *(hyper_pram + list(final_y.flatten())), file = output_file, sep=',')
-                print(final_z.shape[1], *(hyper_pram + list(final_z.flatten())), file = output_file, sep=',')
-                print(final_r)
-            else:
-                cPickle.dump(self.samples, open(output_file, 'w'))
 
         self.total_time += time() - a_time
         return self.gpu_time, self.total_time, None
@@ -418,7 +466,7 @@ class Gibbs(BaseSampler):
             z_by_ry[nth,] = np.dot(cur_z[nth], nth_y)
         return z_by_ry
 
-    def _cl_infer_yzr(self, init_y, init_z, init_r, output_file = None):
+    def _cl_infer_yzr(self, init_y, init_z, init_r):
         """Wrapper function to start the inference on y and z.
         This function is not supposed to directly invoked by an end user.
         @param init_y: Passed in from do_inference()
@@ -449,16 +497,6 @@ class Gibbs(BaseSampler):
                 self.samples['y'].append(cur_r)
             
         self.total_time += time() - a_time
-
-        if output_file is not None:
-            if self.record_best:
-                final_y, final_z, final_r = self.best_sample[0]
-                hyper_pram = [self.alpha, self.lam, self.theta, self.epislon]
-                print(final_z.shape[1], *(hyper_pram + list(final_y.flatten())), file = output_file, sep=',')
-                print(final_z.shape[1], *(hyper_pram + list(final_z.flatten())), file = output_file, sep=',')
-                print(final_r)
-            else:
-                cPickle.dump(self.samples, open(output_file, 'w'))
 
         return self.gpu_time, self.total_time, None
 
