@@ -60,7 +60,7 @@ class Gibbs(BaseSampler):
         # self.d is the length of the flattened vectors
         self.d = self.obs.shape[1]
         self.img_h = int(self.d / self.img_w)
-        self.alpha = self.N / self.N
+        self.alpha = self.N / 1.0
         return
 
     def direct_read_obs(self, obs):
@@ -172,7 +172,7 @@ class Gibbs(BaseSampler):
         cur_r = init_r
 
         a_time = time()
-        self.auto_save_sample(sample = (cur_y, cur_z, cur_r))
+        if self.record_best: self.auto_save_sample(sample = (cur_y, cur_z, cur_r))
         for i in xrange(self.niter):
             temp_cur_y = self._infer_y(cur_y, cur_z, cur_r)
             temp_cur_y, temp_cur_z, temp_cur_r = self._infer_z(temp_cur_y, cur_z, cur_r)
@@ -181,7 +181,7 @@ class Gibbs(BaseSampler):
             if self.record_best:
                 if self.auto_save_sample(sample = (temp_cur_y, temp_cur_z, temp_cur_r)):
                     cur_y, cur_z, cur_r = temp_cur_y, temp_cur_z, temp_cur_r
-                if self.no_improvement():
+                if self.no_improvement(1000):
                     break                    
                 
             elif i >= self.burnin:
@@ -473,22 +473,36 @@ class Gibbs(BaseSampler):
         @param init_z: Passed in from do_inference()
         @param init_r: Passed in from do_inference()
         """
-        a_time = time()
+        total_time = time()
         cur_y = init_y.astype(np.int32)
         cur_z = init_z.astype(np.int32)
         cur_r = init_r.astype(np.int32) # this is fine with only translations
 
-        self.auto_save_sample(sample = (cur_y, cur_z, cur_r))
+        if self.record_best: self.auto_save_sample(sample = (cur_y, cur_z, cur_r))
         for i in xrange(self.niter):
-            temp_cur_y = self._cl_infer_y(cur_y, cur_z, cur_r)
-            temp_cur_z = self._cl_infer_z(temp_cur_y, cur_z, cur_r)
-            temp_cur_r = self._cl_infer_r(temp_cur_y, temp_cur_z, cur_r).astype(np.int32)
+            a_time = time()
+            d_cur_z = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = cur_z.astype(np.int32))
+            d_cur_y = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = cur_y.astype(np.int32))
+            d_cur_r = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = cur_r.astype(np.int32))
+            self.gpu_time += time() - a_time
+
+            d_cur_y = self._cl_infer_y(cur_y, cur_z, cur_r, d_cur_y, d_cur_z, d_cur_r)
+            d_cur_z = self._cl_infer_z(cur_y, cur_z, cur_r, d_cur_y, d_cur_z, d_cur_r)
+            temp_cur_r = self._cl_infer_r(cur_y, cur_z, cur_r, d_cur_y, d_cur_z, d_cur_r)
+
+            a_time = time()
+            temp_cur_y = np.empty_like(cur_y)
+            cl.enqueue_copy(self.queue, temp_cur_y, d_cur_y)
+            temp_cur_z = np.empty_like(cur_z)
+            cl.enqueue_copy(self.queue, temp_cur_z, d_cur_z)
+            self.gpu_time += time() - a_time
+            
             temp_cur_y, temp_cur_z, temp_cur_r = self._cl_infer_k_new(temp_cur_y, temp_cur_z, temp_cur_r)
 
             if self.record_best:
                 if self.auto_save_sample(sample = (temp_cur_y, temp_cur_z, temp_cur_r)):
                     cur_y, cur_z, cur_r = temp_cur_y, temp_cur_z, temp_cur_r
-                if self.no_improvement():
+                if self.no_improvement(1000):
                     break                    
             elif i >= self.burnin:
                 cur_y, cur_z, cur_r = temp_cur_y, temp_cur_z, temp_cur_r
@@ -496,21 +510,18 @@ class Gibbs(BaseSampler):
                 self.samples['y'].append(cur_y)
                 self.samples['y'].append(cur_r)
             
-        self.total_time += time() - a_time
+        self.total_time += time() - total_time
 
         return self.gpu_time, self.total_time, None
 
-    def _cl_infer_y(self, cur_y, cur_z, cur_r):
+    def _cl_infer_y(self, cur_y, cur_z, cur_r, d_cur_y, d_cur_z, d_cur_r):
         """Infer feature images
         """
         a_time = time()
-        d_cur_z = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = cur_z.astype(np.int32))
-        d_cur_y = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = cur_y.astype(np.int32))
-        d_cur_r = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = cur_r.astype(np.int32))
         d_z_by_ry = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, 
                               hostbuf = np.empty(shape = self.obs.shape, dtype = np.int32))
         d_rand = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
-                           hostbuf = np.random.random(cur_z.shape).astype(np.float32))
+                           hostbuf = np.random.random(cur_y.shape).astype(np.float32))
 
         # first transform the feature images and calculate z_by_ry
         self.prg.compute_z_by_ry(self.queue, cur_z.shape, (1, cur_z.shape[1]),
@@ -525,17 +536,13 @@ class Gibbs(BaseSampler):
                           np.int32(self.N), np.int32(self.d), np.int32(cur_y.shape[0]), np.int32(self.img_w),
                           np.float32(self.lam), np.float32(self.epislon), np.float32(self.theta))
 
-        cl.enqueue_copy(self.queue, cur_y, d_cur_y)
         self.gpu_time += time() - a_time
-        return cur_y
+        return d_cur_y
 
-    def _cl_infer_z(self, cur_y, cur_z, cur_r):
+    def _cl_infer_z(self, cur_y, cur_z, cur_r, d_cur_y, d_cur_z, d_cur_r):
         """Infer feature ownership
         """
         a_time = time()
-        d_cur_z = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = cur_z.astype(np.int32))
-        d_cur_y = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = cur_y.astype(np.int32))
-        d_cur_r = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = cur_r.astype(np.int32))
         d_z_by_ry = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, 
                               hostbuf = np.empty(shape = self.obs.shape, dtype = np.int32))
         d_z_col_sum = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
@@ -556,9 +563,8 @@ class Gibbs(BaseSampler):
                           np.int32(self.N), np.int32(self.d), np.int32(cur_y.shape[0]), np.int32(self.img_w),
                           np.float32(self.lam), np.float32(self.epislon), np.float32(self.theta))
 
-        cl.enqueue_copy(self.queue, cur_z, d_cur_z)
         self.gpu_time += time() - a_time
-        return cur_z
+        return d_cur_z
         
     def _cl_infer_k_new(self, cur_y, cur_z, cur_r):
 
@@ -596,7 +602,7 @@ class Gibbs(BaseSampler):
 
         return cur_y, cur_z, cur_r
 
-    def _cl_infer_r(self, cur_y, cur_z, cur_r):
+    def _cl_infer_r(self, cur_y, cur_z, cur_r, d_cur_y, d_cur_z, d_cur_r):
         """Infer transformations using opencl.
         Note: the algorithm works because resampling one value of cur_r at one time
         only affects the loglikelihood of the corresponding image. Therefore, it is
@@ -605,8 +611,6 @@ class Gibbs(BaseSampler):
         each other.
         """
         a_time = time()
-        d_cur_z = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = cur_z.astype(np.int32))
-        d_cur_y = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = cur_y.astype(np.int32))
         d_z_by_ry_old = cl.array.empty(self.queue, self.obs.shape, np.int32, allocator=self.mem_pool)
         d_z_by_ry_new = cl.array.empty(self.queue, self.obs.shape, np.int32, allocator=self.mem_pool)
         d_replace_r = cl.array.empty(self.queue, (self.N,), np.int32, allocator=self.mem_pool)
@@ -767,7 +771,7 @@ class Gibbs(BaseSampler):
         cur_y, cur_z, cur_r = sample
         log_prior = 0
         log_lik = 0
-        if cur_z.shape[1] == 0: return -99999999.9
+        if cur_z.shape[1] == 0: return -999999999.9
     
         if self.cl_mode:
             a_time = time()

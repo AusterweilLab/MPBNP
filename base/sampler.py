@@ -126,6 +126,7 @@ class BaseSampler(object):
         # if there's no best sample recorded yet
         if self.best_sample[0] is None and self.best_sample[1] is None:
             self.best_sample = (sample, new_logprob)
+            print('Initial sample generated, loglik: {0}'.format(new_logprob), file=sys.stderr)
             return
 
         # if there's a best sample
