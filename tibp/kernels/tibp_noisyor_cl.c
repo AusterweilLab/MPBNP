@@ -74,6 +74,17 @@ void v_translate(local int *orig_y, local int *new_y, uint kth,
   }
 }
 
+void v_translate_global(global int *temp_y, global int *transformed_y, uint nth, uint kth,
+			uint f_img_height, uint f_img_width, uint distance,
+			uint K, uint D) {
+  for (int h = 0; h < f_img_height; h++) {
+    for (int w = 0; w < f_img_width; w++) {
+      transformed_y[nth * K * D + kth * D + ((h + distance) % f_img_height) * f_img_width + w] = 
+	temp_y[nth * K * D + kth * D + h * f_img_width + w];
+    }
+  }
+}
+
 void h_translate(local int *orig_y, local int *new_y, uint kth,
 		 uint f_img_height, uint f_img_width, uint distance,
 		 uint D) {
@@ -81,6 +92,17 @@ void h_translate(local int *orig_y, local int *new_y, uint kth,
     for (int w = 0; w < f_img_width; w++) {
       new_y[kth * D + h * f_img_width + (w + distance) % f_img_width] = 
 	orig_y[kth * D + h * f_img_width + w];
+    }
+  }
+}
+
+void h_translate_global(global int *temp_y, global int *transformed_y, uint nth, uint kth,
+			uint f_img_height, uint f_img_width, uint distance,
+			uint K, uint D) {
+  for (int h = 0; h < f_img_height; h++) {
+    for (int w = 0; w < f_img_width; w++) {
+      transformed_y[nth * K * D + kth * D + h * f_img_width + (w + distance) % f_img_width] = 
+	temp_y[nth * K * D + kth * D + h * f_img_width + w];
     }
   }
 }
@@ -107,9 +129,92 @@ void scale(local int *orig_y, local int *new_y, uint kth,
   }
 }
 
+void scale_global(global int *temp_y, global int *transformed_y, uint nth, uint kth, 
+		  uint f_img_height, uint f_img_width, uint x_pixel, uint y_pixel,
+		  uint K, uint D) {
+
+  // compute the new height and width of scaled matrix
+  int new_height = f_img_height + y_pixel;
+  int new_width = f_img_width + x_pixel;
+
+  uint hh, ww, h, w; // hh and ww are indices to original y
+  for (h = 0; h < f_img_height; h++) {
+    for (w = 0; w < f_img_width; w++) {
+      hh = (int)round((float)h / new_height * f_img_height);
+      ww = (int)round((float)w / new_width * f_img_width);
+      if (hh < f_img_height & ww < f_img_width) {
+	transformed_y[nth * K * D + kth * D + h * f_img_width + w] =
+	  temp_y[nth * K * D + kth * D + hh * f_img_width + ww];
+      } else {
+	transformed_y[nth * K * D + kth * D + h * f_img_width + w] = 0;
+      }
+    }
+  }
+}
+
 kernel void compute_z_by_ry(global int *cur_y, global int *cur_z, global int *cur_r,
-			    global int *z_by_ry, local int *orig_y, local int *new_y,
+			    global int *transformed_y, global int *temp_y, global int *z_by_ry,
 			    uint N, uint D, uint K, uint f_img_width) {
+
+  const uint V_SCALE = 0, H_SCALE = 1, V_TRANS = 2, H_TRANS = 3, NUM_TRANS = 4;
+  uint nth = get_global_id(0); // nth is the index of images
+  uint kth = get_global_id(1); // kth is the index of features
+  uint f_img_height = D / f_img_width;
+  
+  if (cur_z[nth * K + kth] == 0) {
+    for (int dth = 0; dth < D; dth++) {
+      transformed_y[nth * K * D + kth * D + dth] = 0;
+    }
+  } else {
+
+  for (int dth = 0; dth < D; dth++) {
+    temp_y[nth * K * D + kth * D + dth] = cur_y[kth * D + dth];
+  }
+  
+  // vertically scale the feature image
+  uint v_scale = cur_r[nth * (K * NUM_TRANS) + kth * NUM_TRANS + V_SCALE];
+  scale_global(temp_y, transformed_y, nth, kth, f_img_height, f_img_width, 0, v_scale, K, D);
+  for (int dth = 0; dth < D; dth++) {
+    temp_y[nth * K * D + kth * D + dth] = transformed_y[nth * K * D + kth * D + dth];
+  }
+  
+  // horizontal scale the feature image
+  uint h_scale = cur_r[nth * (K * NUM_TRANS) + kth * NUM_TRANS + H_SCALE];
+  scale_global(temp_y, transformed_y, nth, kth, f_img_height, f_img_width, h_scale, 0, K, D);
+  for (int dth = 0; dth < D; dth++) {
+    temp_y[nth * K * D + kth * D + dth] = transformed_y[nth * K * D + kth * D + dth];
+  }
+
+  // vertically translate the feature image
+  uint v_dist = cur_r[nth * (K * NUM_TRANS) + kth * NUM_TRANS + V_TRANS];
+  v_translate_global(temp_y, transformed_y, nth, kth, f_img_height, f_img_width, v_dist, K, D);
+  for (int dth = 0; dth < D; dth++) {
+    temp_y[nth * K * D + kth * D + dth] = transformed_y[nth * K * D + kth * D + dth];
+  }
+  
+  // horizontally translate the feature image
+  uint h_dist = cur_r[nth * (K * NUM_TRANS) + kth * NUM_TRANS + H_TRANS];
+  h_translate_global(temp_y, transformed_y, nth, kth, f_img_height, f_img_width, h_dist, K, D);
+  }
+  // wait until copying is done
+  barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE); 
+
+  
+  /* at this point, for each object, a transformed y has been generated */
+  
+  if (kth == 0) {
+    for (int dth = 0; dth < D; dth++) {
+      z_by_ry[nth * D + dth] = 0;
+      for (int k = 0; k < K; k++) {
+	z_by_ry[nth * D + dth] += transformed_y[nth * K * D + k * D + dth] * cur_z[nth * K + k];
+      }
+    }
+  }
+}
+
+kernel void compute_z_by_ry_local(global int *cur_y, global int *cur_z, global int *cur_r,
+				  global int *z_by_ry, local int *orig_y, local int *new_y,
+				  uint N, uint D, uint K, uint f_img_width) {
 
   const uint V_SCALE = 0, H_SCALE = 1, V_TRANS = 2, H_TRANS = 3, NUM_TRANS = 4;
   uint nth = get_global_id(0); // nth is the index of images
@@ -175,6 +280,7 @@ kernel void compute_z_by_ry(global int *cur_y, global int *cur_z, global int *cu
     }
   }
 }
+
 
 kernel void sample_y(global int *cur_y,
 		     global int *cur_z,
@@ -356,7 +462,7 @@ kernel void logprior_z(global uint *cur_z, global float *logprob, local uint *no
   uint m = 0;
   float logprob_temp = 0;
   novel_feat[kth] = 0;
-
+  
   /* calculate the log probability of the nth row of Z 
      i.e., the prior probability of having the features
      of the nth object.

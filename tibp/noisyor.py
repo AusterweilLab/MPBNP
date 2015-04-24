@@ -501,6 +501,7 @@ class Gibbs(BaseSampler):
 
             if self.record_best:
                 if self.auto_save_sample(sample = (temp_cur_y, temp_cur_z, temp_cur_r)):
+                    print('Number of features:', cur_z.shape[1], file=sys.stderr)
                     cur_y, cur_z, cur_r = temp_cur_y, temp_cur_z, temp_cur_r
                 if self.no_improvement(1000):
                     break                    
@@ -522,11 +523,13 @@ class Gibbs(BaseSampler):
                               hostbuf = np.empty(shape = self.obs.shape, dtype = np.int32))
         d_rand = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
                            hostbuf = np.random.random(cur_y.shape).astype(np.float32))
+        transformed_y = np.empty(shape = (self.obs.shape[0], cur_z.shape[1], self.obs.shape[1]), dtype = np.int32)
+        d_transformed_y = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = transformed_y)
+        d_temp_y = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = transformed_y)
 
         # first transform the feature images and calculate z_by_ry
-        self.prg.compute_z_by_ry(self.queue, cur_z.shape, (1, cur_z.shape[1]),
-                                 d_cur_y, d_cur_z, d_cur_r, d_z_by_ry, 
-                                 cl.LocalMemory(cur_y.nbytes), cl.LocalMemory(cur_y.nbytes),
+        self.prg.compute_z_by_ry(self.queue, cur_z.shape, (1, cur_z.shape[1]), 
+                                 d_cur_y, d_cur_z, d_cur_r, d_transformed_y, d_temp_y, d_z_by_ry,
                                  np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_y.shape[0]),
                                  np.int32(self.img_w))
 
@@ -549,11 +552,14 @@ class Gibbs(BaseSampler):
                                 hostbuf = cur_z.sum(axis = 0).astype(np.int32))
         d_rand = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
                            hostbuf = np.random.random(cur_z.shape).astype(np.float32))
+        transformed_y = np.empty(shape = (self.obs.shape[0], cur_z.shape[1], self.obs.shape[1]), dtype = np.int32)
+        d_transformed_y = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = transformed_y)
+        d_temp_y = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = transformed_y)
+
 
         # first transform the feature images and calculate z_by_ry
-        self.prg.compute_z_by_ry(self.queue, cur_z.shape, (1, cur_z.shape[1]),
-                                 d_cur_y, d_cur_z, d_cur_r, d_z_by_ry, 
-                                 cl.LocalMemory(cur_y.nbytes), cl.LocalMemory(cur_y.nbytes),
+        self.prg.compute_z_by_ry(self.queue, cur_z.shape, (1, cur_z.shape[1]), 
+                                 d_cur_y, d_cur_z, d_cur_r, d_transformed_y, d_temp_y, d_z_by_ry,
                                  np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_y.shape[0]),
                                  np.int32(self.img_w))
 
@@ -616,14 +622,16 @@ class Gibbs(BaseSampler):
         d_replace_r = cl.array.empty(self.queue, (self.N,), np.int32, allocator=self.mem_pool)
         d_rand = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR,
                            hostbuf=np.random.random(self.N).astype(np.float32))
+        transformed_y = np.empty(shape = (self.obs.shape[0], cur_z.shape[1], self.obs.shape[1]), dtype = np.int32)
+        d_transformed_y = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = transformed_y)
+        d_temp_y = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = transformed_y)
 
         ########### Dealing with vertical translations first ##########
         d_cur_r = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = cur_r.astype(np.int32))
 
         # calculate the z_by_ry_old under old transformations
         self.prg.compute_z_by_ry(self.queue, cur_z.shape, (1, cur_z.shape[1]),
-                                 d_cur_y, d_cur_z, d_cur_r, d_z_by_ry_old.data, 
-                                 cl.LocalMemory(cur_y.nbytes), cl.LocalMemory(cur_y.nbytes),
+                                 d_cur_y, d_cur_z, d_cur_r, d_transformed_y, d_temp_y, d_z_by_ry_old.data, 
                                  np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_y.shape[0]),
                                  np.int32(self.img_w))
 
@@ -633,8 +641,7 @@ class Gibbs(BaseSampler):
         d_cur_r_new = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = cur_r_new.astype(np.int32))
         
         self.prg.compute_z_by_ry(self.queue, cur_z.shape, (1, cur_z.shape[1]),
-                                 d_cur_y, d_cur_z, d_cur_r_new, d_z_by_ry_new.data, 
-                                 cl.LocalMemory(cur_y.nbytes), cl.LocalMemory(cur_y.nbytes),
+                                 d_cur_y, d_cur_z, d_cur_r_new, d_transformed_y, d_temp_y, d_z_by_ry_new.data, 
                                  np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_y.shape[0]),
                                  np.int32(self.img_w))
 
@@ -658,8 +665,7 @@ class Gibbs(BaseSampler):
 
         # calculate the z_by_ry_old under old transformations
         self.prg.compute_z_by_ry(self.queue, cur_z.shape, (1, cur_z.shape[1]),
-                                 d_cur_y, d_cur_z, d_cur_r, d_z_by_ry_old.data, 
-                                 cl.LocalMemory(cur_y.nbytes), cl.LocalMemory(cur_y.nbytes),
+                                 d_cur_y, d_cur_z, d_cur_r, d_transformed_y, d_temp_y, d_z_by_ry_old.data, 
                                  np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_y.shape[0]),
                                  np.int32(self.img_w))
 
@@ -669,8 +675,7 @@ class Gibbs(BaseSampler):
         d_cur_r_new = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = cur_r_new.astype(np.int32))
         
         self.prg.compute_z_by_ry(self.queue, cur_z.shape, (1, cur_z.shape[1]),
-                                 d_cur_y, d_cur_z, d_cur_r_new, d_z_by_ry_new.data, 
-                                 cl.LocalMemory(cur_y.nbytes), cl.LocalMemory(cur_y.nbytes),
+                                 d_cur_y, d_cur_z, d_cur_r_new, d_transformed_y, d_temp_y, d_z_by_ry_new.data, 
                                  np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_y.shape[0]),
                                  np.int32(self.img_w))
 
@@ -694,8 +699,7 @@ class Gibbs(BaseSampler):
 
         # calculate the z_by_ry_old under old transformations
         self.prg.compute_z_by_ry(self.queue, cur_z.shape, (1, cur_z.shape[1]),
-                                 d_cur_y, d_cur_z, d_cur_r, d_z_by_ry_old.data, 
-                                 cl.LocalMemory(cur_y.nbytes), cl.LocalMemory(cur_y.nbytes),
+                                 d_cur_y, d_cur_z, d_cur_r_new, d_transformed_y, d_temp_y, d_z_by_ry_new.data, 
                                  np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_y.shape[0]),
                                  np.int32(self.img_w))
 
@@ -705,8 +709,7 @@ class Gibbs(BaseSampler):
         d_cur_r_new = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = cur_r_new.astype(np.int32))
         
         self.prg.compute_z_by_ry(self.queue, cur_z.shape, (1, cur_z.shape[1]),
-                                 d_cur_y, d_cur_z, d_cur_r_new, d_z_by_ry_new.data, 
-                                 cl.LocalMemory(cur_y.nbytes), cl.LocalMemory(cur_y.nbytes),
+                                 d_cur_y, d_cur_z, d_cur_r_new, d_transformed_y, d_temp_y, d_z_by_ry_new.data, 
                                  np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_y.shape[0]),
                                  np.int32(self.img_w))
 
@@ -731,8 +734,7 @@ class Gibbs(BaseSampler):
 
         # calculate the z_by_ry_old under old transformations
         self.prg.compute_z_by_ry(self.queue, cur_z.shape, (1, cur_z.shape[1]),
-                                 d_cur_y, d_cur_z, d_cur_r, d_z_by_ry_old.data, 
-                                 cl.LocalMemory(cur_y.nbytes), cl.LocalMemory(cur_y.nbytes),
+                                 d_cur_y, d_cur_z, d_cur_r_new, d_transformed_y, d_temp_y, d_z_by_ry_new.data, 
                                  np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_y.shape[0]),
                                  np.int32(self.img_w))
 
@@ -742,8 +744,7 @@ class Gibbs(BaseSampler):
         d_cur_r_new = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = cur_r_new.astype(np.int32))
         
         self.prg.compute_z_by_ry(self.queue, cur_z.shape, (1, cur_z.shape[1]),
-                                 d_cur_y, d_cur_z, d_cur_r_new, d_z_by_ry_new.data, 
-                                 cl.LocalMemory(cur_y.nbytes), cl.LocalMemory(cur_y.nbytes),
+                                 d_cur_y, d_cur_z, d_cur_r_new, d_transformed_y, d_temp_y, d_z_by_ry_new.data, 
                                  np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_y.shape[0]),
                                  np.int32(self.img_w))
 
@@ -780,9 +781,14 @@ class Gibbs(BaseSampler):
             d_cur_r = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = cur_r.astype(np.int32))
             d_z_by_ry = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, 
                                   hostbuf = np.empty(shape = self.obs.shape, dtype = np.int32))
+            transformed_y = np.empty(shape = (self.obs.shape[0], cur_z.shape[1], self.obs.shape[1]), dtype = np.int32)
+            d_transformed_y = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, 
+                                        hostbuf = transformed_y)
+            d_temp_y = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, 
+                                 hostbuf = transformed_y)
             
             # calculate the log prior of Z
-            d_logprior_z = cl.array.empty(self.queue, cur_z.shape, np.float32, allocator=self.mem_pool)
+            d_logprior_z = cl.array.empty(self.queue, cur_z.shape, np.float32)
             self.prg.logprior_z(self.queue, cur_z.shape, (1, cur_z.shape[1]), 
                                 d_cur_z, d_logprior_z.data, 
                                 cl.LocalMemory(cur_z[0].nbytes), #cl.LocalMemory(cur_z.nbytes),
@@ -791,19 +797,20 @@ class Gibbs(BaseSampler):
 
             # calculate the loglikelihood of data
             # first transform the feature images and calculate z_by_ry
-            self.prg.compute_z_by_ry(self.queue, cur_z.shape, (1, cur_z.shape[1]),
-                                     d_cur_y, d_cur_z, d_cur_r, d_z_by_ry, 
-                                     cl.LocalMemory(cur_y.nbytes), cl.LocalMemory(cur_y.nbytes),
+            self.prg.compute_z_by_ry(self.queue, cur_z.shape, (1, cur_z.shape[1]), 
+                                     d_cur_y, d_cur_z, d_cur_r, d_transformed_y, d_temp_y, d_z_by_ry,
                                      np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_y.shape[0]),
                                      np.int32(self.img_w))
             
-            d_loglik = cl.array.empty(self.queue, self.obs.shape, np.float32, allocator=self.mem_pool)
+            loglik = np.empty(shape = self.obs.shape, dtype = np.float32)
+            d_loglik = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = loglik)
             self.prg.loglik(self.queue, self.obs.shape, None, 
-                            d_z_by_ry, self.d_obs, d_loglik.data,
+                            d_z_by_ry, self.d_obs, d_loglik,
                             np.int32(self.N), np.int32(cur_y.shape[1]), np.int32(cur_z.shape[1]), 
                             np.float32(self.lam), np.float32(self.epislon))
             
-            log_lik = d_loglik.get().sum()
+            cl.enqueue_copy(self.queue, loglik, d_loglik)
+            log_lik = loglik.sum()
             self.gpu_time += time() - a_time
 
             # calculate the prior probability of Y
