@@ -169,7 +169,7 @@ class CollapsedGibbs(BaseSampler):
 
             if self.device_type == cl.device_type.CPU:
                 self.prg.normal_1d_logpost_loopy(self.queue, self.obs.shape, None,
-                                                 d_labels, self.d_ob, d_uniq_label, d_mu, d_ss, d_n, 
+                                                 d_labels, self.d_obs, d_uniq_label, d_mu, d_ss, d_n, 
                                                  np.int32(uniq_labels.shape[0]), d_hyper_param, d_rand,
                                                  d_logpost.data)
             else:
