@@ -22,7 +22,7 @@ class Gibbs(BaseSampler):
     NUM_TRANS = 4
     
     def __init__(self, cl_mode = True, cl_device = None, record_best = True,
-                 alpha = None, lam = 0.98, theta = 0.2, epislon = 0.02, init_k = 1):
+                 alpha = None, lam = 0.98, theta = 0.2, epislon = 0.02, init_k = 10):
         """Initialize the class.
         """
         BaseSampler.__init__(self, cl_mode = cl_mode, cl_device = cl_device, record_best = record_best)
@@ -60,7 +60,7 @@ class Gibbs(BaseSampler):
         # self.d is the length of the flattened vectors
         self.d = self.obs.shape[1]
         self.img_h = int(self.d / self.img_w)
-        self.alpha = self.N / 1.0
+        self.alpha = self.N / 0.5
         return
 
     def direct_read_obs(self, obs):

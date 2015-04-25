@@ -153,8 +153,8 @@ __kernel void normal_1d_logpost_loopy(global uint *labels, global float *data, g
 }
 
 // kernel to compute the joint log probability of data and a given sample (i.e., labels)
-__kernel void joint_logprob(global uint *labels, global float *data, 
-			    global float *hyper_param, global float *logprob) {
+__kernel void joint_logprob_1d(global uint *labels, global float *data, 
+			       global float *hyper_param, global float *logprob) {
 
   uint data_pos = get_global_id(0);
   uint label = labels[data_pos];
@@ -201,6 +201,8 @@ __kernel void joint_logprob(global uint *labels, global float *data,
   logprob[data_pos] = t_logpdf(data[data_pos], 2.0f * alpha_n, mu_n, sigma);
   logprob[data_pos] += (n > 0) ? log( (float)n / ((float)data_pos + alpha)) : log(alpha / ((float)data_pos + alpha));
 }
+
+
 
 __kernel void normal_kd_sigma_matrix(global uint *n, global float *cov_obs, global float *cov_mu0, global float *T, float k0, float v0, global float *sigma) {
   

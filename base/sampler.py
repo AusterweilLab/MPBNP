@@ -76,7 +76,7 @@ class BaseSampler(object):
         self.cl_mode = cl_mode
         self.obs = []
         self.niter = 1000
-        self.thining = 0
+        self.thining = 1
         self.burnin = 0
         self.N = 0 # number of data points
         self.best_sample = (None, None) # (sample, loglikelihood)
@@ -110,7 +110,7 @@ class BaseSampler(object):
     def direct_read_obs(self, obs):
         self.obs = obs
 
-    def set_sampling_params(self, niter = 1000, thining = 0, burnin = 0):
+    def set_sampling_params(self, niter = 1000, thining = 1, burnin = 0):
         self.niter, self.thining, self.burnin = niter, thining, burnin
 
     def do_inference(self, output_file = None):

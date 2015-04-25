@@ -18,7 +18,7 @@ class CollapsedGibbs(BaseSampler):
         """Initialize the class.
         """
         BaseSampler.__init__(self, record_best, cl_mode, cl_device)
-
+        
         if cl_mode:
             program_str = open(pkg_dir + 'MPBNP/crp/kernels/crp_cl.c', 'r').read()
             self.prg = cl.Program(self.ctx, program_str).build()
@@ -40,9 +40,8 @@ class CollapsedGibbs(BaseSampler):
             self.new_obs.append([float(_) for _ in row])
         self.obs = np.array(self.new_obs).astype(np.float32)
 
-        #self.d_obs = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = self.obs)
-        self.d_obs = cl.array.to_device(queue=self.queue, ary=self.obs, allocator=self.mem_pool)
-
+        if self.cl_mode:
+            self.d_obs = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = self.obs)
         return
         
     def do_inference(self, init_labels = None, output_file = None):
@@ -56,10 +55,18 @@ class CollapsedGibbs(BaseSampler):
         else:
             init_labels = init_labels.astype(np.int32)
 
+        if output_file is not None:
+            print(*(['d%d' % _ for _ in xrange(self.N)]), file = output_file, sep=',')
+            
         if self.cl_mode:
-            return self.cl_infer_kdgaussian(init_labels = init_labels, output_file = output_file)
+            timing_stats = self.cl_infer_kdgaussian(init_labels = init_labels, output_file = output_file)
         else:
-            return self.infer_kdgaussian(init_labels = init_labels, output_file = output_file)
+            timing_stats = self.infer_kdgaussian(init_labels = init_labels, output_file = output_file)
+
+        if self.record_best and output_file:
+            print(*self.best_sample[0], file=output_file, sep=',')
+
+        return timing_stats
 
     def infer_1dgaussian(self, init_labels, output_file = None):
         """Perform inference on class labels assuming data are 1-d gaussian,
@@ -69,14 +76,9 @@ class CollapsedGibbs(BaseSampler):
         a_time = time()
 
         cluster_labels = init_labels
-        if self.record_best:
-            self.auto_save_sample(cluster_labels)
+        if self.record_best: self.auto_save_sample(cluster_labels)
         
-        if output_file is not None: print(*xrange(self.N), file = output_file, sep = ',')
         for i in xrange(self.niter):
-
-            if output_file is not None and i >= self.burnin and not self.record_best: 
-                print(*cluster_labels, file = output_file, sep = ',')  
             # identify existing clusters and generate a new one
             uniq_labels = np.unique(cluster_labels)
             _, _, new_cluster_label = smallest_unused_label(uniq_labels)
@@ -108,9 +110,9 @@ class CollapsedGibbs(BaseSampler):
             
             # sample and implement the changes
             temp_cluster_labels = np.empty(cluster_labels.shape, dtype=np.int32)
-            for n in xrange(self.N):
-                target_cluster = sample(a = uniq_labels, p = lognormalize(logpost[n]))
-                temp_cluster_labels[n] = target_cluster
+            for j in xrange(self.N):
+                target_cluster = sample(a = uniq_labels, p = lognormalize(logpost[j]))
+                temp_cluster_labels[j] = target_cluster
 
             if self.record_best:
                 if self.auto_save_sample(temp_cluster_labels):
@@ -118,35 +120,27 @@ class CollapsedGibbs(BaseSampler):
                 if self.no_improvement():
                     break                    
             else:
-                cluster_labels = temp_cluster_labels
+                if i >= self.burnin and i % self.thining == 0:
+                    print(*temp_cluster_labels, file = output_file, sep=',')
                 
-        if output_file is not None and self.record_best: 
-            print(*self.best_sample[0], file = output_file, sep = ',')
-
         self.total_time += time() - a_time
         return self.gpu_time, self.total_time, Counter(cluster_labels).most_common()
 
     def cl_infer_1dgaussian(self, init_labels, output_file = None):
         """Implementing concurrent sampling of class labels with OpenCL.
         """
+        total_a_time = time()
+        cluster_labels = init_labels
+        if self.record_best: self.auto_save_sample(cluster_labels)
+
+        gpu_a_time = time()
         d_hyper_param = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
                                   hostbuf = np.array([self.gaussian_mu0, self.gaussian_k0, 
                                                       self.gamma_alpha0, self.gamma_beta0, self.alpha]).astype(np.float32))
-
-        cluster_labels = init_labels
-        if self.record_best:
-            self.auto_save_sample(cluster_labels)
-
-        #d_labels = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = cluster_labels)
         d_labels = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = cluster_labels)
+        self.gpu_time += time() - gpu_a_time
         
-        if output_file is not None: print(*xrange(self.N), file = output_file, sep = ',')
-        total_a_time = time()
-
         for i in xrange(self.niter):
-            if output_file is not None and i >= self.burnin and not self.record_best: 
-                print(*cluster_labels, file = output_file, sep = ',')            
-        
             uniq_labels = np.unique(cluster_labels)
             _, _, new_cluster_label = smallest_unused_label(uniq_labels)
             uniq_labels = np.hstack((new_cluster_label, uniq_labels)).astype(np.int32)
@@ -163,35 +157,29 @@ class CollapsedGibbs(BaseSampler):
                     suf_stats[label_index] = (label, cluster_mu, cluster_ss, cluster_obs.shape[0])
 
             gpu_a_time = time()
-            #d_uniq_label = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = uniq_labels)
-            d_uniq_label = cl.array.to_device(self.queue, uniq_labels, allocator=self.mem_pool)
-            #d_mu = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
-            #                 hostbuf = suf_stats[:,1].astype(np.float32))
-            d_mu = cl.array.to_device(self.queue, suf_stats[:,1].astype(np.float32), allocator=self.mem_pool)
-            #d_ss = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
-            #                 hostbuf = suf_stats[:,2].astype(np.float32))
-            d_ss = cl.array.to_device(self.queue, suf_stats[:,2].astype(np.float32), allocator=self.mem_pool)
-            #d_n = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
-            #                hostbuf = suf_stats[:,3].astype(np.int32))
-            d_n = cl.array.to_device(self.queue, suf_stats[:,3].astype(np.int32), allocator=self.mem_pool)
+            d_uniq_label = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = uniq_labels)
+            d_mu = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = suf_stats[:,1].astype(np.float32))
+            d_ss = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
+                             hostbuf = suf_stats[:,2].astype(np.float32))
+            d_n = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
+                            hostbuf = suf_stats[:,3].astype(np.int32))
             d_logpost = cl.array.empty(self.queue,(self.obs.shape[0], uniq_labels.shape[0]), np.float32, allocator=self.mem_pool)
-            #d_rand = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
-            #                   hostbuf = np.random.random(self.obs.shape).astype(np.float32))
-            d_rand = cl.array.to_device(self.queue, np.random.random(self.obs.shape).astype(np.float32), allocator=self.mem_pool)
+            d_rand = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
+                               hostbuf = np.random.random(self.obs.shape).astype(np.float32))
 
             if self.device_type == cl.device_type.CPU:
                 self.prg.normal_1d_logpost_loopy(self.queue, self.obs.shape, None,
-                                                 d_labels, self.d_obs.data, d_uniq_label.data, d_mu.data, d_ss.data, d_n.data, 
-                                                 np.int32(uniq_labels.shape[0]), d_hyper_param, d_rand.data,
+                                                 d_labels, self.d_ob, d_uniq_label, d_mu, d_ss, d_n, 
+                                                 np.int32(uniq_labels.shape[0]), d_hyper_param, d_rand,
                                                  d_logpost.data)
             else:
                 self.prg.normal_1d_logpost(self.queue, (self.obs.shape[0], uniq_labels.shape[0]), None,
-                                           d_labels, self.d_obs.data, d_uniq_label.data, d_mu.data, d_ss.data, d_n.data, 
-                                           np.int32(uniq_labels.shape[0]), d_hyper_param, d_rand.data,
+                                           d_labels, self.d_obs, d_uniq_label, d_mu, d_ss, d_n, 
+                                           np.int32(uniq_labels.shape[0]), d_hyper_param, d_rand,
                                            d_logpost.data)
                 self.prg.resample_labels(self.queue, (self.obs.shape[0],), None,
-                                         d_labels, d_uniq_label.data, np.int32(uniq_labels.shape[0]),
-                                         d_rand.data, d_logpost.data)
+                                         d_labels, d_uniq_label, np.int32(uniq_labels.shape[0]),
+                                         d_rand, d_logpost.data)
 
             temp_cluster_labels = np.empty(cluster_labels.shape, dtype=np.int32)
             cl.enqueue_copy(self.queue, temp_cluster_labels, d_labels)
@@ -202,13 +190,10 @@ class CollapsedGibbs(BaseSampler):
                     cluster_labels = temp_cluster_labels
                 if self.no_improvement():
                     break                    
-
             else:
-                cluster_labels = temp_cluster_labels
+                if i >= self.burnin and i % self.thining == 0:
+                    print(*temp_cluster_labels, file = output_file, sep=',')
 
-        if output_file is not None and self.record_best: 
-            print(*self.best_sample[0], file = output_file, sep = ',')
-            
         self.total_time += time() - total_a_time
         return self.gpu_time, self.total_time, Counter(cluster_labels).most_common()
 
@@ -221,34 +206,27 @@ class CollapsedGibbs(BaseSampler):
         if dim == 1:
             return self.infer_1dgaussian(init_labels = init_labels, output_file = output_file)
 
-        data_size = self.obs.shape[0]
-
+        a_time = time()
         # set some prior hyperparameters
         wishart_v0 = dim
         wishart_T0 = np.identity(dim)
         gaussian_k0 = 0.01
         gaussian_mu0 = np.zeros(dim)
 
-        cluster_labels = init_labels.astype(np.int32)
+        cluster_labels = init_labels
 
-        if output_file is not None: print(*xrange(data_size), file = output_file, sep = ',')
-        total_time = 0
         for i in xrange(self.niter):
-            a_time = time()
-            if output_file is not None and i >= burnin: 
-                print(*cluster_labels, file = output_file, sep = ',')            
             # at the beginning of each iteration, identify the unique cluster labels
             uniq_labels = np.unique(cluster_labels)
             _, _, new_cluster_label = smallest_unused_label(uniq_labels)
             uniq_labels = np.hstack((new_cluster_label, uniq_labels))
-            #num_of_clusters = uniq_labels.shape[0]
 
             # compute the sufficient statistics of each cluster
             n = np.empty(uniq_labels.shape)
             mu = np.empty((uniq_labels.shape[0], dim))
             cov_mu0 = np.empty((uniq_labels.shape[0], dim, dim))
             cov_obs = np.empty((uniq_labels.shape[0], dim, dim))
-            logpost = np.empty((data_size, uniq_labels.shape[0]))
+            logpost = np.empty((self.N, uniq_labels.shape[0]))
 
             for label_index in xrange(uniq_labels.shape[0]):
                 label = uniq_labels[label_index]
@@ -275,13 +253,23 @@ class CollapsedGibbs(BaseSampler):
                 logpost[:,label_index] += np.log(n[label_index]) if n[label_index] > 0 else np.log(self.alpha)
                
             # resample the labels and implement the changes
-            for j in xrange(data_size):
+            temp_cluster_labels = np.empty(cluster_labels.shape, dtype=np.int32)
+            for j in xrange(self.N):
                 target_cluster = sample(a = uniq_labels, p = lognormalize(logpost[j]))
-                cluster_labels[j] = target_cluster
+                temp_cluster_labels[j] = target_cluster
 
-            total_time += time() - a_time
+            if self.record_best:
+                if self.auto_save_sample(temp_cluster_labels):
+                    cluster_labels = temp_cluster_labels
+                if self.no_improvement():
+                    break                    
+            else:
+                if i >= self.burnin and i % self.thining == 0:
+                    print(*temp_cluster_labels, file = output_file, sep=',')
+                
+        self.total_time += time() - a_time
             
-        return -1.0, total_time, Counter(cluster_labels).most_common()
+        return self.gpu_time, self.total_time, Counter(cluster_labels).most_common()
 
     def cl_infer_kdgaussian(self, init_labels, output_file = None):
         """Implementing concurrent sampling of class labels with OpenCL.
@@ -292,8 +280,7 @@ class CollapsedGibbs(BaseSampler):
         if dim == 1:
             return self.cl_infer_1dgaussian(init_labels = init_labels, output_file = output_file)
 
-        gpu_time, total_time = 0, 0
-        data_size = np.int32(self.obs.shape[0])
+        total_time = time()
 
         # set some prior hyperparameters
         wishart_v0 = np.float32(dim)
@@ -304,13 +291,9 @@ class CollapsedGibbs(BaseSampler):
 
         cluster_labels = init_labels.astype(np.int32)
 
-        # push data and initial labels onto the openCL device
-        # data won't change, labels are modified on the device
-        #d_data = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = self.obs)
+        # push initial labels onto the openCL device
         d_labels = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = cluster_labels)
 
-        if output_file is not None: print(*xrange(data_size), file = output_file, sep = ',')
-        total_a_time = time()
         for i in xrange(self.niter):
             if output_file is not None and i >= self.burnin: 
                 print(*cluster_labels, file = output_file, sep = ',')            
@@ -340,12 +323,9 @@ class CollapsedGibbs(BaseSampler):
                     h_cov_obs[label_index] = np.dot(obs_deviance.T, obs_deviance)
                     h_cov_mu0[label_index] = np.dot(mu0_deviance, mu0_deviance.T)
                     h_n[label_index] = cluster_obs.shape[0]
-                #kn = gaussian_k0 + h_n[label_index]
-                #vn = wishart_v0 + h_n[label_index]
-                #h_sigma[label_index] = (wishart_T0 + h_cov_obs[label_index] + (gaussian_k0 * h_n[label_index]) / kn * h_cov_mu0[label_index]) * (kn + 1) / kn / (vn - dim + 1)
                     
             # using OpenCL to compute the log posterior of each item and perform resampling
-            gpu_a_time = time()
+            gpu_time = time()
 
             d_n = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = h_n)
             d_mu = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = h_mu)
@@ -365,20 +345,20 @@ class CollapsedGibbs(BaseSampler):
             d_uniq_label = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = uniq_labels)
             d_determinants = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = h_determinants)
             d_inverses = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = h_inverses)
-            d_rand = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = np.random.random(data_size).astype(np.float32))
-            d_logpost = cl.array.empty(self.queue, (data_size, uniq_labels.shape[0]), np.float32, allocator = self.mem_pool)
+            d_rand = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = np.random.random(self.N).astype(np.float32))
+            d_logpost = cl.array.empty(self.queue, (self.N, uniq_labels.shape[0]), np.float32, allocator = self.mem_pool)
 
             # if the OpenCL device is CPU, use the kernel with loops over clusters
             if self.device_type == cl.device_type.CPU:
                 self.prg.normal_kd_logpost_loopy(self.queue, (self.obs.shape[0],), None,
-                                                 d_labels, self.d_obs.data, d_uniq_label, 
+                                                 d_labels, self.d_obs, d_uniq_label, 
                                                  d_mu, d_n, d_determinants, d_inverses,
                                                  num_of_clusters, np.float32(self.alpha),
                                                  dim, wishart_v0, d_logpost.data, d_rand)
             # otherwise, use the kernel that fully unrolls data points and clusters
             else:
                 self.prg.normal_kd_logpost(self.queue, (self.obs.shape[0], uniq_labels.shape[0]), None, 
-                                           d_labels, self.d_obs.data, d_uniq_label, 
+                                           d_labels, self.d_obs, d_uniq_label, 
                                            d_mu, d_n, d_determinants, d_inverses,
                                            num_of_clusters, np.float32(self.alpha),
                                            dim, wishart_v0, d_logpost.data, d_rand)
@@ -386,12 +366,23 @@ class CollapsedGibbs(BaseSampler):
                                          d_labels, d_uniq_label, num_of_clusters,
                                          d_rand, d_logpost.data)
 
-            cl.enqueue_copy(self.queue, cluster_labels, d_labels)
-            gpu_time += time() - gpu_a_time
+            temp_cluster_labels = np.empty(cluster_labels.shape, dtype=np.int32)
+            cl.enqueue_copy(self.queue, temp_cluster_labels, d_labels)
+            self.gpu_time += time() - gpu_time
+
+            if self.record_best:
+                if self.auto_save_sample(temp_cluster_labels):
+                    cluster_labels = temp_cluster_labels
+                if self.no_improvement():
+                    break                    
+            else:
+                if i >= self.burnin and i % self.thining == 0:
+                    print(*temp_cluster_labels, file = output_file, sep=',')
+
         
-        total_time = time() - total_a_time
+        self.total_time = time() - total_time
             
-        return gpu_time, total_time, Counter(cluster_labels).most_common()
+        return self.gpu_time, self.total_time, Counter(cluster_labels).most_common()
 
 
     def _logprob(self, sample):
@@ -441,9 +432,48 @@ class CollapsedGibbs(BaseSampler):
                                       hostbuf = np.array([self.gaussian_mu0, self.gaussian_k0, 
                                                           self.gamma_alpha0, self.gamma_beta0, self.alpha]).astype(np.float32))
             d_logprob = cl.array.empty(self.queue, (self.N,), np.float32, allocator=self.mem_pool)
-            self.prg.joint_logprob(self.queue, self.obs.shape, None,
-                                   d_labels, self.d_obs.data, d_hyper_param, d_logprob.data)
+            self.prg.joint_logprob_1d(self.queue, self.obs.shape, None,
+                                      d_labels, self.d_obs, d_hyper_param, d_logprob.data)
             
             total_logprob = d_logprob.get().sum()
             self.gpu_time += time() - gpu_a_time
+
+        if dim > 1: #and self.cl_mode == False:
+            wishart_v0 = dim
+            wishart_T0 = np.identity(dim)
+            gaussian_k0 = 0.01
+            gaussian_mu0 = np.zeros(dim)
+
+            cluster_dict = {}
+            N = 0
+            for label, obs in zip(sample, self.obs):
+                if label in cluster_dict:
+                    cluster_obs = np.array(cluster_dict[label])
+                    n = cluster_obs.shape[0]
+                    mu = np.mean(cluster_obs, axis = 0)
+                    obs_deviance = cluster_obs - mu
+                    mu0_deviance = np.reshape(gaussian_mu0 - mu, (dim, 1))
+                    cov_obs = np.dot(obs_deviance.T, obs_deviance)
+                    cov_mu0 = np.dot(mu0_deviance, mu0_deviance.T)
+                else:
+                    n, mu, cov_obs, cov_mu0 = 0, 0, 0, 0
+
+                kn = gaussian_k0 + n
+                vn = wishart_v0 + n
+                sigma = (wishart_T0 + cov_obs + (gaussian_k0 * n) / kn * cov_mu0) * (kn + 1) / kn / (vn - dim + 1)
+                det = np.linalg.det(sigma)
+                inv = np.linalg.inv(sigma)
+                df = vn - dim + 1
+
+                loglik = math.lgamma(df / 2.0 + dim / 2.0) - math.lgamma(df / 2.0) - 0.5 * np.log(det) - 0.5 * dim * np.log(df * math.pi) - \
+                    0.5 * (df + dim) * np.log(1.0 + (1.0 / df) * np.dot(np.dot(obs - mu, inv), (obs - mu).T))
+                loglik += np.log(n / (N + self.alpha)) if n > 0 else np.log(self.alpha / (N + self.alpha))
+
+                # modify the counts and dict
+                try: cluster_dict[label].append(obs)
+                except KeyError: cluster_dict[label] = [obs]
+                N += 1
+
+                total_logprob += loglik
+            
         return total_logprob
