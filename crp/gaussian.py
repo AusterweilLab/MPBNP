@@ -24,11 +24,7 @@ class CollapsedGibbs(BaseSampler):
             self.prg = cl.Program(self.ctx, program_str).build()
 
         # set some prior hyperparameters
-        self.alpha = alpha
-        self.gamma_alpha0 = 1.
-        self.gamma_beta0 = 1.
-        self.gaussian_mu0 = 1.
-        self.gaussian_k0 = 0.001
+        self.alpha = np.float32(alpha)
 
     def read_csv(self, filepath, header=True):
         """Read the data from a csv file.
@@ -40,6 +36,17 @@ class CollapsedGibbs(BaseSampler):
             self.new_obs.append([float(_) for _ in row])
         self.obs = np.array(self.new_obs).astype(np.float32)
 
+        try: self.dim = np.int32(self.obs.shape[1])
+        except IndexError: self.dim = np.int32(1)
+        if self.dim == 1:
+            self.gamma_alpha0, self.gamma_beta0 = np.float32(1.0), np.float32(1.0)
+            self.gaussian_mu0, self.gaussian_k0 = np.float32(0.0), np.float32(0.001)
+        else:        
+            self.wishart_v0 = np.float32(self.dim)
+            self.wishart_T0 = np.identity(self.dim, dtype=np.float32)
+            self.gaussian_mu0 = np.zeros(self.dim, dtype=np.float32)
+            self.gaussian_k0 = np.float32(0.001)
+        
         if self.cl_mode:
             self.d_obs = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = self.obs)
         return
@@ -50,8 +57,8 @@ class CollapsedGibbs(BaseSampler):
         """
         BaseSampler.do_inference(self, output_file)
         if init_labels is None:
-            init_labels = np.random.randint(low = 0, high = min(self.obs.shape[0], 10), 
-                                            size = self.obs.shape[0]).astype(np.int32)
+            init_labels = np.random.randint(low = 0, high = min(self.N, 10), size = self.N).astype(np.int32)
+            print(init_labels)
         else:
             init_labels = init_labels.astype(np.int32)
 
@@ -59,9 +66,15 @@ class CollapsedGibbs(BaseSampler):
             print(*(['d%d' % _ for _ in xrange(self.N)]), file = output_file, sep=',')
             
         if self.cl_mode:
-            timing_stats = self.cl_infer_kdgaussian(init_labels = init_labels, output_file = output_file)
+            if self.dim == 1:
+                timing_stats = self.cl_infer_1dgaussian(init_labels = init_labels, output_file = output_file)
+            else:
+                timing_stats = self.cl_infer_kdgaussian(init_labels = init_labels, output_file = output_file)
         else:
-            timing_stats = self.infer_kdgaussian(init_labels = init_labels, output_file = output_file)
+            if self.dim == 1:
+                timing_stats = self.infer_1dgaussian(init_labels = init_labels, output_file = output_file)
+            else:
+                timing_stats = self.infer_kdgaussian(init_labels = init_labels, output_file = output_file)
 
         if self.record_best and output_file:
             print(*self.best_sample[0], file=output_file, sep=',')
@@ -117,7 +130,7 @@ class CollapsedGibbs(BaseSampler):
             if self.record_best:
                 if self.auto_save_sample(temp_cluster_labels):
                     cluster_labels = temp_cluster_labels
-                if self.no_improvement():
+                if self.no_improvement(500):
                     break                    
             else:
                 if i >= self.burnin and i % self.thining == 0:
@@ -200,18 +213,7 @@ class CollapsedGibbs(BaseSampler):
     def infer_kdgaussian(self, init_labels, output_file = None):
         """Implementing concurrent sampling of partition labels without OpenCL.
         """
-        try: dim = self.obs.shape[1]
-        except IndexError: 
-            dim = 1
-        if dim == 1:
-            return self.infer_1dgaussian(init_labels = init_labels, output_file = output_file)
-
         a_time = time()
-        # set some prior hyperparameters
-        wishart_v0 = dim
-        wishart_T0 = np.identity(dim)
-        gaussian_k0 = 0.01
-        gaussian_mu0 = np.zeros(dim)
 
         cluster_labels = init_labels
 
@@ -223,9 +225,9 @@ class CollapsedGibbs(BaseSampler):
 
             # compute the sufficient statistics of each cluster
             n = np.empty(uniq_labels.shape)
-            mu = np.empty((uniq_labels.shape[0], dim))
-            cov_mu0 = np.empty((uniq_labels.shape[0], dim, dim))
-            cov_obs = np.empty((uniq_labels.shape[0], dim, dim))
+            mu = np.empty((uniq_labels.shape[0], self.dim))
+            cov_mu0 = np.empty((uniq_labels.shape[0], self.dim, self.dim))
+            cov_obs = np.empty((uniq_labels.shape[0], self.dim, self.dim))
             logpost = np.empty((self.N, uniq_labels.shape[0]))
 
             for label_index in xrange(uniq_labels.shape[0]):
@@ -237,19 +239,19 @@ class CollapsedGibbs(BaseSampler):
                     cluster_obs = self.obs[np.where(cluster_labels == label)]
                     mu[label_index] = np.mean(cluster_obs, axis = 0)
                     obs_deviance = cluster_obs - mu[label_index]
-                    mu0_deviance = np.reshape(gaussian_mu0 - mu[label_index], (dim, 1))
+                    mu0_deviance = np.reshape(gaussian_mu0 - mu[label_index], (self.dim, 1))
                     cov_obs[label_index] = np.dot(obs_deviance.T, obs_deviance)
                     cov_mu0[label_index] = np.dot(mu0_deviance, mu0_deviance.T)
                     n[label_index] = cluster_obs.shape[0]
-                kn = gaussian_k0 + n[label_index]
-                vn = wishart_v0 + n[label_index]
-                sigma = (wishart_T0 + cov_obs[label_index] + (gaussian_k0 * n[label_index]) / kn * cov_mu0[label_index]) * (kn + 1) / kn / (vn - dim + 1)
+                kn = self.gaussian_k0 + n[label_index]
+                vn = self.wishart_v0 + n[label_index]
+                sigma = (self.wishart_T0 + cov_obs[label_index] + (self.gaussian_k0 * n[label_index]) / kn * cov_mu0[label_index]) * (kn + 1) / kn / (vn - self.dim + 1)
                 det = np.linalg.det(sigma)
                 inv = np.linalg.inv(sigma)
-                df = vn - dim + 1
+                df = vn - self.dim + 1
 
-                logpost[:,label_index] = math.lgamma(df / 2.0 + dim / 2.0) - math.lgamma(df / 2.0) - 0.5 * np.log(det) - 0.5 * dim * np.log(df * math.pi) - \
-                    0.5 * (df + dim) * np.log(1.0 + (1.0 / df) * np.dot(np.dot(self.obs - mu[label_index], inv), (self.obs - mu[label_index]).T).diagonal())
+                logpost[:,label_index] = math.lgamma(df / 2.0 + self.dim / 2.0) - math.lgamma(df / 2.0) - 0.5 * np.log(det) - 0.5 * self.dim * np.log(df * math.pi) - \
+                    0.5 * (df + self.dim) * np.log(1.0 + (1.0 / df) * np.dot(np.dot(self.obs - mu[label_index], inv), (self.obs - mu[label_index]).T).diagonal())
                 logpost[:,label_index] += np.log(n[label_index]) if n[label_index] > 0 else np.log(self.alpha)
                
             # resample the labels and implement the changes
@@ -274,20 +276,10 @@ class CollapsedGibbs(BaseSampler):
     def cl_infer_kdgaussian(self, init_labels, output_file = None):
         """Implementing concurrent sampling of class labels with OpenCL.
         """
-        try: dim = np.int32(self.obs.shape[1])
-        except IndexError: 
-            dim = np.int32(1)
-        if dim == 1:
-            return self.cl_infer_1dgaussian(init_labels = init_labels, output_file = output_file)
-
         total_time = time()
 
         # set some prior hyperparameters
-        wishart_v0 = np.float32(dim)
-        wishart_T0 = np.identity(dim).astype(np.float32)
-        gaussian_k0 = np.float32(0.01)
-        gaussian_mu0 = np.zeros(dim).astype(np.float32)
-        d_T0 = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = wishart_T0)
+        d_T0 = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = self.wishart_T0.astype(np.float32))
 
         cluster_labels = init_labels.astype(np.int32)
 
@@ -305,10 +297,10 @@ class CollapsedGibbs(BaseSampler):
 
             # compute the sufficient statistics of each cluster
             h_n = np.empty(uniq_labels.shape).astype(np.int32)
-            h_mu = np.empty((uniq_labels.shape[0], dim)).astype(np.float32)
-            h_cov_mu0 = np.empty((uniq_labels.shape[0], dim, dim)).astype(np.float32)
-            h_cov_obs = np.empty((uniq_labels.shape[0], dim, dim)).astype(np.float32)
-            h_sigma = np.empty((uniq_labels.shape[0], dim, dim)).astype(np.float32)
+            h_mu = np.empty((uniq_labels.shape[0], self.dim)).astype(np.float32)
+            h_cov_mu0 = np.empty((uniq_labels.shape[0], self.dim, self.dim)).astype(np.float32)
+            h_cov_obs = np.empty((uniq_labels.shape[0], self.dim, self.dim)).astype(np.float32)
+            h_sigma = np.empty((uniq_labels.shape[0], self.dim, self.dim)).astype(np.float32)
 
             for label_index in xrange(uniq_labels.shape[0]):
                 label = uniq_labels[label_index]
@@ -319,7 +311,7 @@ class CollapsedGibbs(BaseSampler):
                     cluster_obs = self.obs[np.where(cluster_labels == label)]
                     h_mu[label_index] = np.mean(cluster_obs, axis = 0)
                     obs_deviance = cluster_obs - h_mu[label_index]
-                    mu0_deviance = np.reshape(gaussian_mu0 - h_mu[label_index], (dim, 1))
+                    mu0_deviance = np.reshape(self.gaussian_mu0 - h_mu[label_index], (self.dim, 1))
                     h_cov_obs[label_index] = np.dot(obs_deviance.T, obs_deviance)
                     h_cov_mu0[label_index] = np.dot(mu0_deviance, mu0_deviance.T)
                     h_n[label_index] = cluster_obs.shape[0]
@@ -335,7 +327,7 @@ class CollapsedGibbs(BaseSampler):
             
             self.prg.normal_kd_sigma_matrix(self.queue, h_cov_obs.shape, None,
                                             d_n, d_cov_obs, d_cov_mu0, 
-                                            d_T0, gaussian_k0, wishart_v0, d_sigma.data)
+                                            d_T0, self.gaussian_k0, self.wishart_v0, d_sigma.data)
             
             # copy the sigma matrix to host memory and calculate determinants and inversions
             h_sigma = d_sigma.get()
@@ -353,15 +345,15 @@ class CollapsedGibbs(BaseSampler):
                 self.prg.normal_kd_logpost_loopy(self.queue, (self.obs.shape[0],), None,
                                                  d_labels, self.d_obs, d_uniq_label, 
                                                  d_mu, d_n, d_determinants, d_inverses,
-                                                 num_of_clusters, np.float32(self.alpha),
-                                                 dim, wishart_v0, d_logpost.data, d_rand)
+                                                 num_of_clusters, self.alpha,
+                                                 self.dim, self.wishart_v0, d_logpost.data, d_rand)
             # otherwise, use the kernel that fully unrolls data points and clusters
             else:
                 self.prg.normal_kd_logpost(self.queue, (self.obs.shape[0], uniq_labels.shape[0]), None, 
                                            d_labels, self.d_obs, d_uniq_label, 
                                            d_mu, d_n, d_determinants, d_inverses,
-                                           num_of_clusters, np.float32(self.alpha),
-                                           dim, wishart_v0, d_logpost.data, d_rand)
+                                           num_of_clusters, self.alpha,
+                                           self.dim, self.wishart_v0, d_logpost.data, d_rand)
                 self.prg.resample_labels(self.queue, (self.obs.shape[0],), None,
                                          d_labels, d_uniq_label, num_of_clusters,
                                          d_rand, d_logpost.data)
@@ -373,7 +365,7 @@ class CollapsedGibbs(BaseSampler):
             if self.record_best:
                 if self.auto_save_sample(temp_cluster_labels):
                     cluster_labels = temp_cluster_labels
-                if self.no_improvement():
+                if self.no_improvement(1000):
                     break                    
             else:
                 if i >= self.burnin and i % self.thining == 0:
@@ -389,13 +381,9 @@ class CollapsedGibbs(BaseSampler):
         """Calculate the joint log probability of data and model given a sample.
         """
         assert(len(sample) == len(self.obs))
-
-        try: dim = self.obs.shape[1]
-        except IndexError: dim = 1
-        
         total_logprob = 0
 
-        if dim == 1 and self.cl_mode == False:
+        if self.dim == 1 and self.cl_mode == False:
             cluster_dict = {}
             N = 0
             for label, obs in zip(sample, self.obs):
@@ -425,7 +413,7 @@ class CollapsedGibbs(BaseSampler):
 
                 total_logprob += loglik
 
-        if dim == 1 and self.cl_mode:
+        if self.dim == 1 and self.cl_mode:
             gpu_a_time = time()
             d_labels = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf = sample)
             d_hyper_param = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, 
@@ -438,12 +426,7 @@ class CollapsedGibbs(BaseSampler):
             total_logprob = d_logprob.get().sum()
             self.gpu_time += time() - gpu_a_time
 
-        if dim > 1: #and self.cl_mode == False:
-            wishart_v0 = dim
-            wishart_T0 = np.identity(dim)
-            gaussian_k0 = 0.01
-            gaussian_mu0 = np.zeros(dim)
-
+        if self.dim > 1:# and self.cl_mode == False:
             cluster_dict = {}
             N = 0
             for label, obs in zip(sample, self.obs):
@@ -452,21 +435,21 @@ class CollapsedGibbs(BaseSampler):
                     n = cluster_obs.shape[0]
                     mu = np.mean(cluster_obs, axis = 0)
                     obs_deviance = cluster_obs - mu
-                    mu0_deviance = np.reshape(gaussian_mu0 - mu, (dim, 1))
+                    mu0_deviance = np.reshape(self.gaussian_mu0 - mu, (self.dim, 1))
                     cov_obs = np.dot(obs_deviance.T, obs_deviance)
                     cov_mu0 = np.dot(mu0_deviance, mu0_deviance.T)
                 else:
                     n, mu, cov_obs, cov_mu0 = 0, 0, 0, 0
 
-                kn = gaussian_k0 + n
-                vn = wishart_v0 + n
-                sigma = (wishart_T0 + cov_obs + (gaussian_k0 * n) / kn * cov_mu0) * (kn + 1) / kn / (vn - dim + 1)
+                kn = self.gaussian_k0 + n
+                vn = self.wishart_v0 + n
+                sigma = (self.wishart_T0 + cov_obs + (self.gaussian_k0 * n) / kn * cov_mu0) * (kn + 1) / kn / (vn - self.dim + 1)
                 det = np.linalg.det(sigma)
                 inv = np.linalg.inv(sigma)
-                df = vn - dim + 1
+                df = vn - self.dim + 1
 
-                loglik = math.lgamma(df / 2.0 + dim / 2.0) - math.lgamma(df / 2.0) - 0.5 * np.log(det) - 0.5 * dim * np.log(df * math.pi) - \
-                    0.5 * (df + dim) * np.log(1.0 + (1.0 / df) * np.dot(np.dot(obs - mu, inv), (obs - mu).T))
+                loglik = math.lgamma(df / 2.0 + self.dim / 2.0) - math.lgamma(df / 2.0) - 0.5 * np.log(det) - 0.5 * self.dim * np.log(df * math.pi) - \
+                    0.5 * (df + self.dim) * np.log(1.0 + (1.0 / df) * np.dot(np.dot(obs - mu, inv), (obs - mu).T))
                 loglik += np.log(n / (N + self.alpha)) if n > 0 else np.log(self.alpha / (N + self.alpha))
 
                 # modify the counts and dict
@@ -475,5 +458,5 @@ class CollapsedGibbs(BaseSampler):
                 N += 1
 
                 total_logprob += loglik
-            
+
         return total_logprob
