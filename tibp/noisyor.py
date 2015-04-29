@@ -115,6 +115,7 @@ class Gibbs(BaseSampler):
                            header=','.join(['feature%d' % _ for _ in range(num_of_feats)]))
 
                 for k in xrange(num_of_feats):
+                    print('Feature %d\n---------' % k, file = output_file)
                     np.savetxt(output_file, final_y[k].reshape(self.img_w, self.img_h),
                                fmt="%d", delimiter=',')
 
@@ -127,7 +128,8 @@ class Gibbs(BaseSampler):
             if self.record_best:
                 final_y, final_z, final_r = self.best_sample[0]
                 num_of_feats = final_z.shape[1]
-                os.mkdir(output_file)
+                try: os.mkdir(output_file)
+                except: pass
                 print('parameter,value',
                       'alpha,%f' % self.alpha, 'lambda,%f' % self.lam, 'theta,%f' % self.theta,
                       'epislon,%f' % self.epislon, 'phi,%f' % self.phi, 'inferred_K,%d' % num_of_feats,
@@ -149,7 +151,8 @@ class Gibbs(BaseSampler):
                         print(n, k, *final_r[n,k], file=transform_fp, sep=',')
                 transform_fp.close()
             else:
-                os.mkdir(output_file)
+                try: os.mkdir(output_file)
+                except: pass
                 print('parameter,value',
                       'alpha,%f' % self.alpha, 'lambda,%f' % self.lam, 'theta,%f' % self.theta,
                       'epislon,%f' % self.epislon, 'phi,%f' % self.phi, 

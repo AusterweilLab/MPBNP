@@ -70,9 +70,9 @@ for chain in xrange(args.chain):
     # set up the output file
     if args.output_to_file: 
         if args.opencl:
-            sample_dest = output_path + input_filename + '-%d-%s-chain-%d-cl.pickled' % (args.iter - args.burnin, args.kernel, chain + 1)
+            sample_dest = output_path + input_filename + '-%d-%s-chain-%d-cl/' % (args.iter - args.burnin, args.kernel, chain + 1)
         else:
-            sample_dest = output_path + input_filename + '-%d-%s-chain-%d-nocl.pickled' % (args.iter - args.burnin, args.kernel, chain + 1)
+            sample_dest = output_path + input_filename + '-%d-%s-chain-%d-nocl/' % (args.iter - args.burnin, args.kernel, chain + 1)
     elif args.output_to_stdout:
         sample_dest = sys.stdout
     else:

@@ -16,7 +16,7 @@ np.set_printoptions(suppress=True)
 class Gibbs(BaseSampler):
 
     def __init__(self, cl_mode = True, cl_device = None, record_best = True,
-                 alpha = None, lam = 0.98, theta = 0.2, epislon = 0.02, init_k = 10):
+                 alpha = None, lam = 0.99, theta = 0.01, epislon = 0.01, init_k = 20):
         """Initialize the class.
         """
         BaseSampler.__init__(self, cl_mode = cl_mode, cl_device = cl_device, record_best = record_best)
@@ -46,14 +46,21 @@ class Gibbs(BaseSampler):
         BaseSampler.read_csv(self, filepath, header)
         # convert the data to floats
         self.new_obs = []
+        self.img_w, self.img_h = None, None
         for row in self.obs:
+            if self.img_w is None:
+                self.img_w = int(row[0])
+                if self.img_w == 0 or (len(row)-1) % self.img_w != 0:
+                    raise Exception('The sampler does not understand the format of the data. Did you forget to specify image width in the data file?')
             self.new_obs.append([int(_) for _ in row])
-        self.obs = np.array(self.new_obs)
+
+            self.obs = np.array(self.new_obs)[:,1:]
         if self.cl_mode:
             self.d_obs = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf=self.obs.astype(np.int32))
 
-        self.d = len(self.obs[0])
-        self.alpha = self.N / self.N
+        self.d = self.obs.shape[1]
+        self.img_h = int(self.d / self.img_w)
+        self.alpha = float(self.N) * 5
         return
 
     def direct_read_obs(self, obs):
@@ -79,10 +86,58 @@ class Gibbs(BaseSampler):
             assert(init_z.shape == (len(self.obs), self.k))
 
         if self.cl_mode:
-            return self._cl_infer_yz(init_y, init_z, output_file)
+            timing_stats = self._cl_infer_yz(init_y, init_z, output_file)
         else:
-            return self._infer_yz(init_y, init_z, output_file)
+            timing_stats = self._infer_yz(init_y, init_z, output_file)
 
+        # report the results
+        if output_file is sys.stdout:
+            if self.record_best:
+                final_y, final_z = self.best_sample[0]
+                num_of_feats = final_z.shape[1]
+                print('parameter,value',
+                      'alpha,%f' % self.alpha, 'lambda,%f' % self.lam, 'theta,%f' % self.theta,
+                      'epislon,%f' % self.epislon, 'inferred_K,%d' % num_of_feats,
+                      file = output_file, sep='\n')
+
+                np.savetxt(output_file, final_z, fmt="%d", comments='', delimiter=',',
+                           header=','.join(['feature%d' % _ for _ in range(num_of_feats)]))
+
+                for k in xrange(num_of_feats):
+                    print('Feature %d\n---------' % k, file = output_file)
+                    np.savetxt(output_file, final_y[k].reshape(self.img_w, self.img_h),
+                               fmt="%d", delimiter=',')
+                      
+        else:
+            if self.record_best:
+                final_y, final_z = self.best_sample[0]
+                num_of_feats = final_z.shape[1]
+                try: os.mkdir(output_file)
+                except: pass
+                print('parameter,value',
+                      'alpha,%f' % self.alpha, 'lambda,%f' % self.lam, 'theta,%f' % self.theta,
+                      'epislon,%f' % self.epislon, 'inferred_K,%d' % num_of_feats,
+                      file = gzip.open(output_file + 'parameters.csv.gz', 'w'), sep = '\n')
+                
+                np.savetxt(gzip.open(output_file + 'feature_ownership.csv.gz', 'w'), final_z,
+                           fmt="%d", comments='', delimiter=',',
+                           header=','.join(['feature%d' % _ for _ in range(num_of_feats)]))
+
+                for k in xrange(num_of_feats):
+                    np.savetxt(gzip.open(output_file + 'feature_%d_image.csv.gz' % k, 'w'),
+                               final_y[k].reshape(self.img_w, self.img_h), fmt="%d", delimiter=',')
+            else:
+                try: os.mkdir(output_file)
+                except: pass
+                print('parameter,value',
+                      'alpha,%f' % self.alpha, 'lambda,%f' % self.lam, 'theta,%f' % self.theta,
+                      'epislon,%f' % self.epislon, 
+                      file = gzip.open(output_file + 'parameters.csv.gz', 'w'), sep = '\n')
+                np.savez_compressed(output_file + 'feature_ownership.npz', self.samples['z'])
+                np.savez_compressed(output_file + 'feature_images.npz', self.samples['y'])
+
+        return timing_stats
+                
     def _infer_yz(self, init_y, init_z, output_file):
         """Wrapper function to start the inference on y and z.
         This function is not supposed to directly invoked by an end user.
@@ -109,16 +164,6 @@ class Gibbs(BaseSampler):
                 cur_y, cur_z = temp_cur_y, temp_cur_z
                 self.samples['z'].append(cur_z)
                 self.samples['y'].append(cur_y)
-
-        if output_file is not None:
-            if self.record_best:
-                # print out the Y matrix
-                final_y, final_z = self.best_sample[0]
-                hyper_pram = [self.alpha, self.lam, self.theta, self.epislon]
-                print(final_z.shape[1], *(hyper_pram + list(final_y.flatten())), file = output_file, sep=',')
-                print(final_z.shape[1], *(hyper_pram + list(final_z.flatten())), file = output_file, sep=',')
-            else:
-                cPickle.dump(self.samples, open(output_file, 'w'))
 
         self.total_time += time() - a_time
         return self.gpu_time, self.total_time, None
@@ -300,7 +345,7 @@ class Gibbs(BaseSampler):
             if self.record_best:
                 if self.auto_save_sample(sample = (temp_cur_y, temp_cur_z)):
                     cur_y, cur_z = temp_cur_y, temp_cur_z
-                if self.no_improvement():
+                if self.no_improvement(1000):
                     break                    
             elif i >= self.burnin:
                 cur_y, cur_z = temp_cur_y, temp_cur_z
@@ -308,16 +353,6 @@ class Gibbs(BaseSampler):
                 self.samples['y'].append(cur_y)
             
             self.total_time += time() - a_time
-
-        if output_file is not None:
-            if self.record_best:
-                # print out the Y matrix
-                final_y, final_z = self.best_sample[0]
-                hyper_pram = [self.alpha, self.lam, self.theta, self.epislon]
-                print(final_z.shape[1], *(hyper_pram + list(final_y.flatten())), file = output_file, sep=',')
-                print(final_z.shape[1], *(hyper_pram + list(final_z.flatten())), file = output_file, sep=',')
-            else:
-                cPickle.dump(self.samples, open(output_file, 'w'))
 
         return self.gpu_time, self.total_time, None
 
