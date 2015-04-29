@@ -252,13 +252,13 @@ To give you an idea, here's an example:
 
 ### Prepare the input data ###
 
-The IBP sampler expects the input data to be in a [Comma-separated Values](http://en.wikipedia.org/wiki/Comma-separated_values) (.csv) format. When the noisyor likelihood function is used, each column indicates the index of a pixel, and each row indicates an individual image. The csv file should consist of binary values only, which represent whether a pixel is on or off in an image. A header line is also expected. For example, the following is a perfectly fine input data set for images with 4 pixels, when a noisyor likelihood function is used:
+The IBP sampler expects the input data to be in a [Comma-separated Values](http://en.wikipedia.org/wiki/Comma-separated_values) (.csv) format. When the noisyor likelihood function is used, each column indicates the index of a pixel, and each row indicates an individual image. Importantly, the first column of each row should indicate the actual **width** of an image (in number of pixels) and they should be identical for the same data set. The rest of the values in the csv file should consist of binary values only, which represent whether a pixel is on or off in an image. A header line is also expected. For example, the following is a perfectly fine input data set, when a noisyor likelihood function is used:
 
 ```
-P1,P2,P3,P4
-1,1,0,0
-0,0,1,1
-1,1,1,1
+W,P1,P2,P3,P4
+2,1,1,0,0
+2,0,0,1,1
+2,1,1,1,1
 ```
 
 Available options are almost identical to the CRP sampler, as described in detail above. Please use the `--help` function to see supported kernels.
