@@ -58,7 +58,6 @@ class CollapsedGibbs(BaseSampler):
         BaseSampler.do_inference(self, output_file)
         if init_labels is None:
             init_labels = np.random.randint(low = 0, high = min(self.N, 10), size = self.N).astype(np.int32)
-            print(init_labels)
         else:
             init_labels = init_labels.astype(np.int32)
 
