@@ -46,6 +46,13 @@ parser.add_argument('--distributed_chains', action='store_true', default=False, 
 
 # parse and print out the arguments
 args = parser.parse_args()
+
+# check for imcompatibilities
+if args.output_mode == 'all' and args.output_to_stdout:
+    print('Recording all samples is chosen, but printing to screen is also selected. This is not recommended.', file=sys.stderr)
+    sys.exit(0)
+
+
 print_args_summary(args)
 
 # parse the name of the input file and set up output file path

@@ -8,7 +8,11 @@ MPBNP is started by the Austerweil Lab in the Department of Cognitive, Linguisti
 
 # Installation #
 
-To obtain MPBNP, simply clone the git repository, or if you have no idea what that means, [download here](https://github.com/tqian86/MPBNP/archive/master.zip). To run MPBNP, please make sure that all prerequisites are installed on your computer, as described below.
+To obtain MPBNP, **NEVER** use the master repository, which is almost always unstable. Instead, choose a frozen release by browsing through the different branches. The current release is v0.01. 
+
+If you have no idea what the above sentence that means, download the latest release [here](https://github.com/tqian86/MPBNP/archive/v0.01.zip). We will try to keep this link updated so that it also fetches the latest stable version of MPBNP.
+
+To run MPBNP, please make sure that all prerequisites are installed on your computer, as described below.
 
 ## Prerequisites ##
 
@@ -238,7 +242,7 @@ This output combines both debug messages and the final output. The debug message
 
 The final output are the two lines consisting of numbers, one before the debug messages and one after the debug messages. The first line indexes the data points, and thus ranges from 0 to 199, covering the 200 data points in this example. The second line indexes the class label of each data point. Data points with `6` as its label are in the same cluster. The numerical differences between the names of class labels are arbitrary (i.e., a `6` data point is not more superior to a `1` data point in any sense). 
 
-If instead of `--output_to_stdout`, the sampler was run with `--output_to_file`, then these lines representing the best sample will **not** be printed to the screen. They will be recorded in a file in the working directory. The screen will only display the debug messages.
+If instead of `--output_to_stdout`, the sampler was run with `--output_to_file`, then these lines representing the best sample will **not** be printed to the screen. They will be recorded in a file in the **same directory as the input file**. The screen will only display the debug messages.
 
 Given these class labels, one can easily proceed to extract the means, variances and other statistics of interest for each class / category of data points. 
 
@@ -263,6 +267,8 @@ W,P1,P2,P3,P4
 
 Available options are almost identical to the CRP sampler, as described in detail above. Please use the `--help` function to see supported kernels.
 
+Note that if `--output_to_file` is selected for the IBP sampler, it will create a directory with a name similar to the input file in the **same directory of the input file**. Inside the newly created directory, the sampler will save the results in several different files whose names should be relatively intuitive.
+
 ## Transformed Indian Buffet Process (tIBP) Sampler ##
 
 The **transformed** Indian Buffet Process Sampler can be invoked by running the `tIBPSamplingUtility.py` program with options.
@@ -283,6 +289,8 @@ W,P1,P2,P3,P4
 ```
 
 Available options are almost identical to the IBP sampler, as described in detail above. Please use the `--help` function to see supported kernels.
+
+Note that if `--output_to_file` is selected for the tIBP sampler, it will create a directory with a name similar to the input file in the **same directory of the input file**. Inside the newly created directory, the sampler will save the results in several different files whose names should be relatively intuitive.
 
 I wish to contact the author for questions, comments and suggestions.
 ---
