@@ -36,7 +36,7 @@ class Gibbs(BaseSampler):
         self.theta = theta # prior probability that a pixel is on in a feature image
         self.lam = lam # effecacy of a feature
         self.epislon = epislon # probability that a pixel is on by change in an actual image
-        self.phi = 0.8 # prior probability that no transformation is applied
+        self.phi = 0.9 # prior probability that no transformation is applied
         self.samples = {'z': [], 'y': [], 'r': []} # sample storage, to be pickled
 
     def read_csv(self, filepath, header=True):
@@ -60,7 +60,7 @@ class Gibbs(BaseSampler):
         # self.d is the length of the flattened vectors
         self.d = self.obs.shape[1]
         self.img_h = int(self.d / self.img_w)
-        self.alpha = self.N / 0.5
+        self.alpha = self.N 
         return
 
     def direct_read_obs(self, obs):
@@ -705,7 +705,7 @@ class Gibbs(BaseSampler):
 
         # calculate the z_by_ry_old under old transformations
         self.prg.compute_z_by_ry(self.queue, cur_z.shape, (1, cur_z.shape[1]),
-                                 d_cur_y, d_cur_z, d_cur_r_new, d_transformed_y, d_temp_y, d_z_by_ry_new.data, 
+                                 d_cur_y, d_cur_z, d_cur_r_new, d_transformed_y, d_temp_y, d_z_by_ry_old.data, 
                                  np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_y.shape[0]),
                                  np.int32(self.img_w))
 
@@ -740,7 +740,7 @@ class Gibbs(BaseSampler):
 
         # calculate the z_by_ry_old under old transformations
         self.prg.compute_z_by_ry(self.queue, cur_z.shape, (1, cur_z.shape[1]),
-                                 d_cur_y, d_cur_z, d_cur_r_new, d_transformed_y, d_temp_y, d_z_by_ry_new.data, 
+                                 d_cur_y, d_cur_z, d_cur_r_new, d_transformed_y, d_temp_y, d_z_by_ry_old.data, 
                                  np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_y.shape[0]),
                                  np.int32(self.img_w))
 
