@@ -22,7 +22,7 @@ class Gibbs(BaseSampler):
     NUM_TRANS = 4
     
     def __init__(self, cl_mode = True, cl_device = None, record_best = True,
-                 alpha = None, lam = 0.98, theta = 0.2, epislon = 0.02, init_k = 10):
+                 alpha = None, lam = 0.98, theta = 0.10, epislon = 0.02, init_k = 10):
         """Initialize the class.
         """
         BaseSampler.__init__(self, cl_mode = cl_mode, cl_device = cl_device, record_best = record_best)
@@ -109,6 +109,7 @@ class Gibbs(BaseSampler):
                 print('parameter,value',
                       'alpha,%f' % self.alpha, 'lambda,%f' % self.lam, 'theta,%f' % self.theta,
                       'epislon,%f' % self.epislon, 'phi,%f' % self.phi, 'inferred_K,%d' % num_of_feats,
+                      'gpu_time,%f' % timing_stats[0], 'total_time,%f' % timing_stats[1],
                       file = output_file, sep = '\n')
                 
                 np.savetxt(output_file, final_z, fmt="%d", comments='', delimiter=',',
@@ -133,6 +134,7 @@ class Gibbs(BaseSampler):
                 print('parameter,value',
                       'alpha,%f' % self.alpha, 'lambda,%f' % self.lam, 'theta,%f' % self.theta,
                       'epislon,%f' % self.epislon, 'phi,%f' % self.phi, 'inferred_K,%d' % num_of_feats,
+                      'gpu_time,%f' % timing_stats[0], 'total_time,%f' % timing_stats[1],
                       file = gzip.open(output_file + 'parameters.csv.gz', 'w'), sep = '\n')
                 
                 np.savetxt(gzip.open(output_file + 'feature_ownership.csv.gz', 'w'), final_z,
@@ -155,7 +157,8 @@ class Gibbs(BaseSampler):
                 except: pass
                 print('parameter,value',
                       'alpha,%f' % self.alpha, 'lambda,%f' % self.lam, 'theta,%f' % self.theta,
-                      'epislon,%f' % self.epislon, 'phi,%f' % self.phi, 
+                      'epislon,%f' % self.epislon, 'phi,%f' % self.phi,
+                      'gpu_time,%f' % timing_stats[0], 'total_time,%f' % timing_stats[1],
                       file = gzip.open(output_file + 'parameters.csv.gz', 'w'), sep = '\n')
                 np.savez_compressed(output_file + 'feature_ownership.npz', self.samples['z'])
                 np.savez_compressed(output_file + 'feature_images.npz', self.samples['y'])
