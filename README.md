@@ -1,4 +1,4 @@
-MPBNP
+MPBNP V0.01 Release
 =====
 
 MPBNP is short for **M**assively **P**arallel **B**ayesian **N**on**p**arametric models. It is a collection of OpenCL-accelerated samplers that perform Bayesian posterior inferences for Bayesian nonparametric models (such as the Chinese Restaurant Process mixture models and the Indian Buffet Process models). It is primarily intended to make life easier for cognitive science and machine learning researchers who use Bayesian nonparametric models in their work.
@@ -9,8 +9,6 @@ MPBNP is started by the Austerweil Lab in the Department of Cognitive, Linguisti
 # Installation #
 
 To obtain MPBNP, **NEVER** use the master repository, which is almost always unstable. Instead, choose a frozen release by browsing through the different branches. The current release is v0.01.
-
-**If you are reading this sentence, you are on the correct page for the v0.01 release.**
 
 If you have no idea what the above sentence that means, download the latest release [here](https://github.com/tqian86/MPBNP/archive/v0.01.zip). We will try to keep this link updated so that it also fetches the latest stable version of MPBNP.
 
@@ -269,7 +267,7 @@ W,P1,P2,P3,P4
 
 Available options are almost identical to the CRP sampler, as described in detail above. Please use the `--help` function to see supported kernels.
 
-Note that if `--output_to_file` is selected for the IBP sampler, it will create a directory with a name similar to the input file in the **same directory of the input file**. Inside the newly created directory, the sampler will save the results in several different files whose names should be relatively intuitive.
+Note that if `--output_to_file` is selected for the tIBP sampler, it will create a directory with a name similar to the input file in the **same directory of the input file**. Inside the newly created directory, the sampler will save the sampling results in several different files. The contents of each result file should be relatively intuitive given their filenames. 
 
 ## Transformed Indian Buffet Process (tIBP) Sampler ##
 
@@ -278,6 +276,8 @@ The **transformed** Indian Buffet Process Sampler can be invoked by running the 
 To give you an idea, here's an example:
 
 `$ python tIBPSamplingUtility --data_file ./data/tibp-image-wide-n8.csv --output_to_stdout --opencl`
+
+> MPBNP v0.01 supports two forms of transformations - vertical translation and horizontal translation. Scaling is disabled in this release due to potential problems. Scaling is planned for future releases.
 
 ### Prepare the input data ###
 
@@ -292,7 +292,7 @@ W,P1,P2,P3,P4
 
 Available options are almost identical to the IBP sampler, as described in detail above. Please use the `--help` function to see supported kernels.
 
-Note that if `--output_to_file` is selected for the tIBP sampler, it will create a directory with a name similar to the input file in the **same directory of the input file**. Inside the newly created directory, the sampler will save the results in several different files whose names should be relatively intuitive.
+Note that if `--output_to_file` is selected for the tIBP sampler, it will create a directory with a name similar to the input file in the **same directory of the input file**. Inside the newly created directory, the sampler will save the sampling results in several different files. The contents of each result file should be relatively intuitive given their filenames. 
 
 I wish to contact the author for questions, comments and suggestions.
 ---
