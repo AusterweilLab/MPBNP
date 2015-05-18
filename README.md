@@ -95,15 +95,11 @@ OpenCL drivers are usually pre-installed on all Apple computers.
 
 #### Python 2.7 ####
 
-Python is pre-installed on all Apple computers. 
+Although Python is pre-installed on all Apple computers, we recommend obtaining the latest Python 2.7 from Python's official website. The latest Python 2.7 contains the pip tool, which makes the installation of Python packages much easier.
 
 #### Numpy, scipy, and pyopencl ####
 
-Both *numpy* and *scipy* are pre-installed on Apple computers upgraded to Mac OSX 10.10. To determine if *numpy* or *scipy* is installed on computers with earlier versions of Mac OSX, open a terminal window and type `python` at the command prompt. Then, try `import numpy` and `import numpy` - if any of these import commands produces an error, then the corresponding package is NOT installed on your computer. 
-
-The recommended method for installing numpy, scipy and pyopencl is via [Macports](https://www.macports.org/). Please visit Macport's website for instructions on how to install it and obtain these packages.
-
-You may also follow the [installation tutorial provided by PyOpenCL](http://wiki.tiker.net/PyOpenCL/Installation/Mac) if Macports looks too complicated to set up.
+The recommended method for installing numpy, scipy and pyopencl is via the pip tool that comes with the latest Python 2.7 downloaded from Python's official website. Simply open a terminal window, and then type `pip install numpy`, `pip install scipy` and `pip install pyopencl` to install these packages.
 
 After these packages are installed, you should be all set.
 
