@@ -294,4 +294,4 @@ Note that if `--output_to_file` is selected for the tIBP sampler, it will create
 
 I wish to contact the author for questions, comments and suggestions.
 ---
-Send me an email at ting_qian@brown.edu. I am a postdoc at the Austerweil Lab at Brown University. I'd love to hear from you.
+Send me an email at qiant@email.chop.edu. I'd love to hear from you.
