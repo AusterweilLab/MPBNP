@@ -119,7 +119,7 @@ usage: CRPSamplingUtility.py [-h] [--opencl] [--opencl_device {ask,gpu,cpu}]
                              [--chain CHAIN] [--distributed_chains]
 
 A sampler for the Chinese Restaurant Process mixture model with and without
-OpenCL support. Please contact Ting Qian <ting_qian@brown.edu> for questions
+OpenCL support. Please contact Ting Qian <qiant@email.chop.edu> for questions
 and feedback.
 
 optional arguments:
@@ -292,4 +292,4 @@ Note that if `--output_to_file` is selected for the tIBP sampler, it will create
 
 I wish to contact the author for questions, comments and suggestions.
 ---
-Send me an email at ting_qian@brown.edu. I am a postdoc at the Austerweil Lab at Brown University. I'd love to hear from you.
+Send me an email at qiant@email.chop.edu. I'd love to hear from you.
