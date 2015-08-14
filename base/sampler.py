@@ -72,6 +72,10 @@ class BaseSampler(object):
             self.device = self.ctx.get_info(cl.context_info.DEVICES)[0]
             self.device_type = self.device.type
             self.device_compute_units = self.device.max_compute_units
+            self.device_platform = self.device.platform.name.replace('\x00', '').strip()
+            self.device_name = self.device.name.replace('\x00', '').strip()
+            self.device_vendor = self.device.vendor.replace('\x00', '').strip()
+            self.device_max_cu = self.device.max_compute_units
             
         self.cl_mode = cl_mode
         self.obs = []
@@ -109,12 +113,18 @@ class BaseSampler(object):
 
     def direct_read_obs(self, obs):
         self.obs = obs
+        self.N = len(obs)
 
     def set_sampling_params(self, niter = 1000, thining = 1, burnin = 0):
         self.niter, self.thining, self.burnin = niter, thining, burnin
 
     def do_inference(self, output_file = None):
         """Perform inference. This method does nothing in the base class.
+        """
+        return
+
+    def convert_sample_to_host(self, sample):
+        """Converts sample to host... this needs to be specific to particular, so base does nothing
         """
         return
 
@@ -125,16 +135,16 @@ class BaseSampler(object):
         new_logprob = self._logprob(sample)
         # if there's no best sample recorded yet
         if self.best_sample[0] is None and self.best_sample[1] is None:
-            self.best_sample = (sample, new_logprob)
-            print('Initial sample generated, loglik: {0}'.format(new_logprob), file=sys.stderr)
+            self.best_sample = (self.convert_sample_to_host(sample), new_logprob)
+            print('Initial sample generated, logprob: {0}'.format(new_logprob), file=sys.stderr)
             return
 
         # if there's a best sample
         if new_logprob > self.best_sample[1]:
             self.no_improv = 0
             self.best_diff.append(new_logprob - self.best_sample[1])
-            self.best_sample = (copy.deepcopy(sample), new_logprob)
-            print('New best sample found, loglik: {0}'.format(new_logprob), file=sys.stderr)
+            self.best_sample = (copy.deepcopy(self.convert_sample_to_host(sample)), new_logprob)
+            print('New best sample found, logprob: {0}'.format(new_logprob), file=sys.stderr)
             return True
         else:
             self.no_improv += 1
@@ -143,12 +153,12 @@ class BaseSampler(object):
     def no_improvement(self, threshold=500):
         if len(self.best_diff) == 0: return False
         if self.no_improv > threshold or np.mean(self.best_diff[-threshold:]) < 1:
-            print('Too little improvement in loglikelihood - Abort searching', file=sys.stderr)
+            print('Too little improvement in log probability - Abort searching', file=sys.stderr)
             return True
         return False
         
     def _logprob(self, sample):
-        """Compute the logliklihood of data given a sample. This method
+        """Compute the log likelihood of data given a sample. This method
         does nothing in the base class.
         """
         return
