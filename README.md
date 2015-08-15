@@ -3,7 +3,7 @@ MPBNP
 
 MPBNP is short for **M**assively **P**arallel **B**ayesian **N**on**p**arametric models. It is a collection of OpenCL-accelerated samplers that perform Bayesian posterior inferences for Bayesian nonparametric models (such as the Chinese Restaurant Process mixture models and the Indian Buffet Process models). It is primarily intended to make life easier for cognitive science and machine learning researchers who use Bayesian nonparametric models in their work.
 
-MPBNP is started by the Austerweil Lab in the Department of Cognitive, Linguistic, and Psychological Sciences at Brown University. Anyone interested in this project is welcome to provide feedback and comments, or join the development!
+MPBNP is started by the [Austerweil Lab](http://research.clps.brown.edu/joe/) in the Department of Cognitive, Linguistic, and Psychological Sciences at Brown University. Anyone interested in this project is welcome to provide feedback and comments, or join the development!
 
 
 # Installation #
@@ -92,6 +92,8 @@ You should be all set.
 OpenCL drivers are usually pre-installed on all Apple computers.
 
 > **Important!** The current Intel driver on Mac OSX contains a bug in calculating ``lgamma``, which is used in MPBNP's Chinese Restaurant Process sampler. Please avoid using the sampler on Intel HD Graphics iGPUs until a fix is released. Unfortunately, we do not know when this fix will be released on Mac OSX.
+
+> Also, Apple CPUs do not allow more than one work-item per work-group to be used. What this means is that it won't take advantage of all of the speed ups that are included in this software package (and will not run until we check for Apple CPU and set the code accordingly -- see issues.) 
 
 #### Python 2.7 ####
 
@@ -292,6 +294,6 @@ Available options are almost identical to the IBP sampler, as described in detai
 
 Note that if `--output_to_file` is selected for the tIBP sampler, it will create a directory with a name similar to the input file in the **same directory of the input file**. Inside the newly created directory, the sampler will save the results in several different files whose names should be relatively intuitive.
 
-I wish to contact the author for questions, comments and suggestions.
+I wish to contact the authors for questions, comments and suggestions.
 ---
-Send me an email at qiant@email.chop.edu. I'd love to hear from you.
+Send Joe (joseph_austerweil@brown.edu) or Ting (qiant@email.chop.edu) an email. We'd love to hear from you.
