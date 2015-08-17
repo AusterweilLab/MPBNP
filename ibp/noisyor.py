@@ -22,9 +22,10 @@ np.set_printoptions(suppress=True)
 class Gibbs(BaseSampler):
 
     def __init__(self, cl_mode = True, cl_device = None, record_best = True,
-                 alpha = None, lam = 0.99, theta = 0.2, epislon = 0.01,
-                 sim_annealP = True, init_k = 10, T_init=30., anneal_rate = .98,
-                 splitP = 0.8):
+                 alpha = None, lam = 0.99, theta = 0.25, epislon = 0.01,
+                 sim_annealP = True, init_k = 10, T_init=30., anneal_rate = .99,
+                 splitProb = 0.8, split_mergeP = True, split_steps=5,
+                 splitAdj = 1/150):
         """Initialize the class.
         """
         BaseSampler.__init__(self, cl_mode = cl_mode, cl_device = cl_device, record_best = record_best)
@@ -51,13 +52,16 @@ class Gibbs(BaseSampler):
         self.epislon = epislon # probability that a pixel is on by change in an actual image
         self.samples = {'z': [], 'y': []} # sample storage, to be pickled
         self.sim_annealP = sim_annealP
-        self.splitP = splitP
+        self.splitProb = splitProb
         if sim_annealP:
             self.anneal_rate = anneal_rate
             self.T = T_init #current simulated annealing temperature
         else:
             self.T = 1
             self.anneal_rate = 1.
+        self.split_mergeP = split_mergeP
+        self.split_steps = split_steps
+        self.splitAdj = splitAdj
         
     def read_csv(self, filepath, header=True):
         """Read the data from a csv file.
@@ -418,39 +422,44 @@ class Gibbs(BaseSampler):
             if (i % (self.niter/10)) == 0:
                 print("%d sweeps of %d with T %f and K %d" % (i,self.niter,self.T, self.k))
             a_time = time()
-            #print("iteration: %d; K: %d;" %(i,self.k))
-            if debugP:
+
+            if self.split_mergeP and ((i % self.split_steps) == 0):
+                #split/merge step!
+                #print("trying a split-merge step")
+                d_cur_y, d_cur_z = self._cl_split_merge_anneal_step(d_cur_y, d_cur_z)
+            else:
+                if debugP:
+                    cl.enqueue_copy(self.queue, self.tmp_z, d_cur_z)
+                    cl.enqueue_copy(self.queue, self.tmp_y, d_cur_y)
+
+                    print("pre-infer_y")
+                    print("cur_y:")
+                    print(self.tmp_y)
+                    print("cur_z")
+                    print(self.tmp_z)
+                d_cur_y = self._cl_infer_y(d_cur_y, d_cur_z)
+                if debugP:
+                    cl.enqueue_copy(self.queue, self.tmp_z, d_cur_z)
+                    cl.enqueue_copy(self.queue, self.tmp_y, d_cur_y)
+
+                    print("pre-infer_z")
+                    print("cur_y:")
+                    print(self.tmp_y)
+                    print("cur_z")
+                    print(self.tmp_z)
+                d_cur_z = self._cl_infer_z(d_cur_y, d_cur_z)
+                self.gpu_time += time() - a_time
                 cl.enqueue_copy(self.queue, self.tmp_z, d_cur_z)
                 cl.enqueue_copy(self.queue, self.tmp_y, d_cur_y)
-
-                print("pre-infer_y")
-                print("cur_y:")
-                print(self.tmp_y)
-                print("cur_z")
-                print(self.tmp_z)
-            d_cur_y = self._cl_infer_y(d_cur_y, d_cur_z)
-            if debugP:
-                cl.enqueue_copy(self.queue, self.tmp_z, d_cur_z)
-                cl.enqueue_copy(self.queue, self.tmp_y, d_cur_y)
-
-                print("pre-infer_z")
-                print("cur_y:")
-                print(self.tmp_y)
-                print("cur_z")
-                print(self.tmp_z)
-            d_cur_z = self._cl_infer_z(d_cur_y, d_cur_z)
-            self.gpu_time += time() - a_time
-            cl.enqueue_copy(self.queue, self.tmp_z, d_cur_z)
-            cl.enqueue_copy(self.queue, self.tmp_y, d_cur_y)
             
-            if debugP:
-                print("pre- create new feats")
-                print("cur_y:")
-                print(self.tmp_y)
-                print("cur_z")
-                print(self.tmp_z)
-            d_cur_y, d_cur_z = self._cl_infer_k_newJLA2(self.tmp_y, self.tmp_z)
-
+                if debugP:
+                    print("pre- create new feats")
+                    print("cur_y:")
+                    print(self.tmp_y)
+                    print("cur_z")
+                    print(self.tmp_z)
+                d_cur_y, d_cur_z = self._cl_infer_k_newJLA2(self.tmp_y, self.tmp_z)
+ 
             if self.record_best:
                 # if self.k != cur_z.shape[1]:
                 #     cur_z = np.require(np.zeros(shape = (self.obs.shape[0], self.k), dtype=np.int32),
@@ -464,8 +473,8 @@ class Gibbs(BaseSampler):
                     ignoreVal = self.auto_save_sample(sample=(d_cur_y,d_cur_z))
                 else:
                     ignoreVal = self.auto_save_sample(sample = (cur_y, cur_z))
-                if self.no_improvement(1000):
-                    break                    
+                #if self.no_improvement(1000):
+                #    break                    
             elif i >= self.burnin:
                 #cur_y, cur_z = temp_cur_y, temp_cur_z
                 cl.enqueue_copy(self.queue, cur_z, d_cur_z)
@@ -1224,13 +1233,14 @@ class Gibbs(BaseSampler):
             cl.enqueue_copy(self.queue, cur_y, d_cur_y)
             cl.enqueue_copy(self.queue, cur_z, d_cur_z)
             ms = np.sum(cur_z,0)
+            lp_cur = self._logprob((d_cur_y,d_cur_z))
             p_ms = ms / np.sum(ms)
-            if samp[0] < self.splitP:
+            if samp[0] < self.splitProb:
                 #split
                 k_ind = np.random.choice(np.arange(K),size=1,p=p_ms)
                 nks = cur_z[:,k_ind]
                 poss_ns = np.where(nks==1)
-                pick2 = np.random.permutation(possNs)
+                pick2 = np.random.permutation(poss_ns)
                 n1 = pick2[0]
                 n2 = pick2[1]
                 #form a split proposal give it n2
@@ -1240,9 +1250,11 @@ class Gibbs(BaseSampler):
                                    requirements=['C', 'A'])
                 y_zeros = np.require(np.zeros(shape=(1,D),dtype=np.int32), dtype=np.int32,
                                    requirements=['C', 'A'])
-                z_samp = np.concatenate((cur_z, z_zeros),axis=1)
-                y_samp = np.concatenate((cur_y, y_zeros),axis=0)
-                z_samp[n2,K+1] = 1
+                #print(z_samp.shape)
+                z_samp = np.concatenate((z_samp, z_zeros),axis=1)
+                y_samp = np.concatenate((y_samp, y_zeros),axis=0)
+                #print(z_samp.shape)
+                z_samp[n2,K] = 1
                 z_samp[n2,k_ind] = 0
                 z_samp[pick2[2:],k_ind] = 0
                 d_samp_z = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR,
@@ -1250,22 +1262,37 @@ class Gibbs(BaseSampler):
                 d_samp_y = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR,
                                           hostbuf = y_samp.astype(np.int32))
                 self.k = K+1 #remember to set k back to K if we reject
-                d_samp_y = _cl_infer_y(self, d_samp_y, d_samp_z)
-                d_samp_z = _cl_infer_z(self, d_samp_y, d_samp_z)
+                d_samp_y = self._cl_infer_y(d_samp_y, d_samp_z)
+                d_samp_z = self._cl_infer_z(d_samp_y, d_samp_z)
                 #cl.enqueue_copy(self.queue, z_samp, d_samp_z)
                 #cl.enqueue_copy(self.queue, y_samp, d_samp_y)
-                lp_prop = _logprob((d_y_samp,d_z_samp))
-                lp_cur = _logprob((d_cur_y,d_cur_z))
-                ap = min(1, math.exp(self.T*(lp_prop - lp_cur)*self.splitAdj))
+                self.tmp_y = np.require(np.zeros(shape=(self.k,D),dtype=np.int32), dtype=np.int32,
+                                        requirements=['C', 'A'])
+                self.tmp_z = np.require(np.zeros(shape=(N,self.k),dtype=np.int32), dtype=np.int32,
+                                        requirements=['C', 'A'])
+                lp_prop = self._logprob((d_samp_y,d_samp_z))
+
+                expVal = self.T*self.splitAdj*(lp_prop - lp_cur)
+                ap = None
+                if expVal > 1:
+                    ap = 1
+                elif expVal < -100:
+                    ap = 0
+                else:
+                    ap = min(1, math.exp(expVal))
                 a_samp = np.random.rand(1)[0]
                 if a_samp >= ap:
                     #reject
                     self.k = K
+                    self.tmp_y = np.require(np.zeros(shape=(self.k,D),dtype=np.int32), dtype=np.int32,
+                                            requirements=['C', 'A'])
+                    self.tmp_z = np.require(np.zeros(shape=(N,self.k),dtype=np.int32), dtype=np.int32,
+                                            requirements=['C', 'A'])
+
                 else:
                     #accept
                     d_cur_y = d_samp_y
                     d_cur_z = d_samp_z
-                    #TODO: should we add a bias term?
             else:
                 #merge proposal
                 #pick two features
@@ -1284,15 +1311,30 @@ class Gibbs(BaseSampler):
                                           hostbuf = z_samp.astype(np.int32))
                 d_samp_y = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR,
                                           hostbuf = y_samp.astype(np.int32))
-                d_samp_y = _cl_infer_y(self, d_samp_y, d_samp_z)
-                lp_prop = _logprob((d_y_samp,d_z_samp))
-                lp_cur = _logprob((d_cur_y,d_cur_z))
-                ap = min(1, math.exp(self.T*(lp_prop - lp_cur)*self.splitAdj))
+                d_samp_y = self._cl_infer_y(d_samp_y, d_samp_z)
+                self.tmp_y = np.require(np.zeros(shape=(self.k,D),dtype=np.int32), dtype=np.int32,
+                                        requirements=['C', 'A'])
+                self.tmp_z = np.require(np.zeros(shape=(N,self.k),dtype=np.int32), dtype=np.int32,
+                                        requirements=['C', 'A'])
+                lp_prop = self._logprob((d_samp_y,d_samp_z))
+                #lp_cur = self._logprob((d_cur_y,d_cur_z))
+                expVal = self.T*self.splitAdj*(lp_prop - lp_cur)
+                ap = None
+                if expVal > 1:
+                    ap = 1
+                elif expVal < -100:
+                    ap = 0
+                else:
+                    ap = min(1, math.exp(expVal))
                 a_samp = np.random.rand(1)[0]
 
                 if a_samp >= ap:
                     #reject
                     self.k = K
+                    self.tmp_y = np.require(np.zeros(shape=(self.k,D),dtype=np.int32), dtype=np.int32,
+                                            requirements=['C', 'A'])
+                    self.tmp_z = np.require(np.zeros(shape=(N,self.k),dtype=np.int32), dtype=np.int32,
+                                            requirements=['C', 'A'])
                 else:
                     #accept
                     d_cur_y = d_samp_y
