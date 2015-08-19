@@ -65,6 +65,42 @@ int sample(uint a_size,  uint *a, float *p, int start, float rand) {
   return a[a_size - 1];
 }
 
+kernel void init_bufferFlt(global float* data, uint len, float val) {
+  int idx = get_global_id(0);
+
+  if (idx < convert_int(len)) {
+    data[idx] = val;
+  }
+}
+
+kernel void init_bufferInt(global int* data, uint len, int val) {
+  int idx = get_global_id(0);
+
+  if (idx < convert_int(len)) {
+    data[idx] = val;
+  }
+
+}
+
+
+kernel void init_2bufferFlt(global float* data1, global float* data2, uint len, float val) {
+  int idx = get_global_id(0);
+
+  if (idx < convert_int(len)) {
+    data1[idx] = val;
+    data2[idx] = val;
+  }
+}
+
+kernel void init_2bufferInt(global int* data1, global int* data2, uint len, int val) {
+  int idx = get_global_id(0);
+
+  if (idx < convert_int(len)) {
+    data1[idx] = val;
+    data2[idx] = val;
+  }
+}
+
 kernel void sample_yJLA(local float* locmem, global int* cur_y, global int *cur_z, global int* cur_recon,
 			global int* obs, global float*rand, uint N, uint D, uint K,
 			float lambda, float epislon, float theta) {
@@ -121,9 +157,7 @@ kernel void sample_yJLA(local float* locmem, global int* cur_y, global int *cur_
 
 }
 
-//TODO: understand why barriers break with printfs in this function... checks ok with a non-local version though...
-//TODO: check if this is fixed after oclgrind checks...
-kernel void calc_y_lps(local float* locmem, global int* cur_y, global int *cur_z, global int* cur_recon,
+kernel void calc_y_lps_old(local float* locmem, global int* cur_y, global int *cur_z, global int* cur_recon,
 		       global int* obs, global float* lp_off, global float* lp_on,
 		       uint N, uint D, uint K, uint numPrevRun,
 		       float lambda, float epislon, float theta) {
@@ -135,7 +169,7 @@ kernel void calc_y_lps(local float* locmem, global int* cur_y, global int *cur_z
 
   int obs_ind = nth*D + dth;
   int my_y_ind = kth*D+dth;
-  
+
   int my_obs_val = obs[obs_ind];
   int my_recon = cur_recon[obs_ind];
   int my_z_val = cur_z[nth*K+kth];
@@ -193,6 +227,203 @@ kernel void calc_y_lps(local float* locmem, global int* cur_y, global int *cur_z
     //printf("nth: %d, kth: %d, dth: %d, cur_lp_off %f; lpOffSum: %f; cur_lp_on %f; lpOnSum: %f\n",
     //       nth, kth, dth,lp_off[my_y_ind], lpOffSum, lp_on[my_y_ind], lpOnSum);
     lp_off[my_y_ind] = lp_off[my_y_ind] + lpOffSum;
+    lp_on[my_y_ind] = lp_on[my_y_ind] + lpOnSum;
+  }
+}
+
+//TODO: understand why barriers break with printfs in this function... checks ok with a non-local version though...
+//TODO: check if this is fixed after oclgrind checks...
+kernel void calc_y_lps(local float* locmem, global int* cur_y, global int *cur_z, global int* cur_recon,
+		       global int* obs, global float* lp_off, global float* lp_on,
+		       uint N, uint D, uint K, uint numPrevRun,
+		       float lambda, float epislon, float theta) {
+  int nth = get_global_id(0) + numPrevRun;
+  int numRun = get_global_size(0);
+  int kth = get_global_id(1);
+  int dth = get_global_id(2);
+  int lid = get_local_id(0);
+
+
+  int obs_ind = nth*D + dth;
+  int my_y_ind = kth*D+dth;
+  if (obs_ind < N) {
+    int my_obs_val = obs[obs_ind];
+    int my_recon = cur_recon[obs_ind];
+    int my_z_val = cur_z[nth*K+kth];
+    //int my_obs_val = 1;
+    //int my_recon = 0;
+    //int my_z_val = 1;
+
+    //TODO: see if it's faster to share global or do lpOn in parallel
+    //TODO: Also, look whether it's best to make group_size one smaller
+    //if (lid == 0) {
+    //  locmem[0] = (float) cur_y[my_y_ind];
+    //}
+    //barrier(CLK_LOCAL_MEM_FENCE);
+
+    int my_y_val =cur_y[my_y_ind];
+    //int my_y_val = cur_y[my_y_ind];
+    float pow_val = native_powr(1-lambda, my_recon) * (1-epislon);
+    float pow_val_less1 = native_powr(1-lambda, max(my_recon-1,0)) * (1-epislon);
+    float pow_val_plus1 = native_powr(1-lambda, my_recon+1) * (1-epislon);
+
+    // lpOff
+    locmem[lid] = my_z_val * my_y_val * my_obs_val * log(1-pow_val_less1)
+      + my_z_val * my_y_val * (1-my_obs_val) * log(pow_val_less1)
+      + my_z_val * (1-my_y_val) * my_obs_val * log(1-pow_val)
+      + my_z_val * (1-my_y_val) * (1-my_obs_val) * log(pow_val)
+      + (1-my_z_val) * my_obs_val * log(1-pow_val)
+      + (1-my_z_val) * (1-my_obs_val) * log(pow_val);
+
+    // + numRun for lpOn
+    locmem[lid+numRun] = my_z_val * my_y_val * my_obs_val * log(1-pow_val)
+      + my_z_val * my_y_val * (1-my_obs_val) * log(pow_val)
+      + my_z_val * (1-my_y_val) * my_obs_val * log(1-pow_val_plus1)
+      + my_z_val * (1-my_y_val) * (1-my_obs_val) * log(pow_val_plus1)
+      + (1-my_z_val) * my_obs_val * log(1-pow_val)
+      + (1-my_z_val) * (1-my_obs_val) * log(pow_val);
+    //printf("setting local memory - lid+numRun: %d for %d,%d,%d\n", lid+numRun, nth,kth,dth);
+    //printf("n: %d; k: %d; d: %d; z: %d, y: %d, x: %d; recon: %d; lpOff: %f; lpOn: %f\n",
+    //  nth,kth,dth,my_z_val, my_y_val, my_obs_val, my_recon, locmem[1+lid], locmem[1+lid+numRun]);
+  }
+  barrier(CLK_LOCAL_MEM_FENCE );
+  if ((lid==0) && (obs_ind < N)) {
+    // TODO: should reduce instead of for loop
+    float lpOffSum = log(1-theta);
+    float lpOnSum = log(theta);
+    int numLoop = min(convert_int(N)-convert_int(numPrevRun),numRun);
+    //printf("numLoop: %d; N: %d; numPrevRun: %d; numRun: %d\n",
+      //     numLoop, N, numPrevRun, numRun);
+    for (int i = 0; i < numLoop; i++) {
+      //printf("in loop: i+numRun: %d for %d, %d, %d\n", i+numRun, nth,kth,dth);
+      lpOffSum +=locmem[i];
+      lpOnSum += locmem[i+numRun];
+    }
+
+    //lpOffSum = locmem[3];
+
+
+    //printf("my_y_ind %d; nth: %d, kth: %d, dth: %d; numRun %d:\n",
+    //       my_y_ind, nth, kth, dth, numRun);
+    //printf("nth: %d, kth: %d, dth: %d, cur_lp_off %f; lpOffSum: %f; cur_lp_on %f; lpOnSum: %f\n",
+    //       nth, kth, dth,lp_off[my_y_ind], lpOffSum, lp_on[my_y_ind], lpOnSum);
+    lp_off[my_y_ind] = lp_off[my_y_ind] + lpOffSum;
+    lp_on[my_y_ind] = lp_on[my_y_ind] + lpOnSum;
+  }
+}
+
+
+//TODO: understand why barriers break with printfs in this function... checks ok with a non-local version though...
+//TODO: check if this is fixed after oclgrind checks...
+kernel void calc_y_lp_off(local float* locmem, global int* cur_y, global int *cur_z, global int* cur_recon,
+		       global int* obs, global float* lp_off, 
+		       uint N, uint D, uint K, uint numPrevRun,
+		       float lambda, float epislon, float theta) {
+  int nth = get_global_id(0) + numPrevRun;
+  int numRun = get_global_size(0);
+  int kth = get_global_id(1);
+  int dth = get_global_id(2);
+  int lid = get_local_id(0);
+
+
+  int obs_ind = nth*D + dth;
+
+  int my_y_ind = kth*D+dth;
+  if (nth < N) {
+  
+  int my_obs_val = obs[obs_ind];
+  int my_recon = cur_recon[obs_ind];
+  int my_z_val = cur_z[nth*K+kth];
+
+
+  int my_y_val =cur_y[my_y_ind];
+
+  float pow_val = native_powr(1-lambda, my_recon) * (1-epislon);
+  float pow_val_less1 = native_powr(1-lambda, max(my_recon-1,0)) * (1-epislon);
+  float pow_val_plus1 = native_powr(1-lambda, my_recon+1) * (1-epislon);
+
+  // lpOff
+  locmem[lid] = my_z_val * my_y_val * my_obs_val * log(1-pow_val_less1)
+    + my_z_val * my_y_val * (1-my_obs_val) * log(pow_val_less1)
+    + my_z_val * (1-my_y_val) * my_obs_val * log(1-pow_val)
+    + my_z_val * (1-my_y_val) * (1-my_obs_val) * log(pow_val)
+    + (1-my_z_val) * my_obs_val * log(1-pow_val)
+    + (1-my_z_val) * (1-my_obs_val) * log(pow_val);
+
+ }
+  barrier(CLK_LOCAL_MEM_FENCE);
+  if (lid==0) {
+    // TODO: should reduce instead of for loop
+    float lpOffSum = log(1-theta);
+    int numLoop = min(convert_int(N)-convert_int(numPrevRun),numRun);
+    //printf("numLoop: %d; num_run %d; N: %d; numPrevRun %d\n", numLoop, numRun, N, numPrevRun);
+    for (int i = 0; i < numLoop; i++) {
+      lpOffSum +=locmem[i];
+    }
+
+    //lpOffSum = locmem[3];
+
+
+    //printf("my_y_ind %d; nth: %d, kth: %d, dth: %d; numRun %d:\n",
+    //       my_y_ind, nth, kth, dth, numRun);
+    //printf("nth: %d, kth: %d, dth: %d, cur_lp_off %f; lpOffSum: %f; cur_lp_on %f; lpOnSum: %f\n",
+    //       nth, kth, dth,lp_off[my_y_ind], lpOffSum, lp_on[my_y_ind], lpOnSum);
+    lp_off[my_y_ind] = lp_off[my_y_ind] + lpOffSum;
+  }
+}
+
+//TODO: understand why barriers break with printfs in this function... checks ok with a non-local version though...
+//TODO: check if this is fixed after oclgrind checks...
+kernel void calc_y_lp_on(local float* locmem, global int* cur_y, global int *cur_z, global int* cur_recon,
+		       global int* obs, global float* lp_on,
+		       uint N, uint D, uint K, uint numPrevRun,
+		       float lambda, float epislon, float theta) {
+  int nth = get_global_id(0) + numPrevRun;
+
+  int numRun = get_global_size(0);
+  int kth = get_global_id(1);
+  int dth = get_global_id(2);
+  int lid = get_local_id(0);
+
+  int obs_ind = nth*D + dth;
+  int my_y_ind = kth*D+dth;
+  if (nth < N) {
+  int my_obs_val = obs[obs_ind];
+  int my_recon = cur_recon[obs_ind];
+  int my_z_val = cur_z[nth*K+kth];
+ 
+  int my_y_val =cur_y[my_y_ind];
+
+  float pow_val = native_powr(1-lambda, my_recon) * (1-epislon);
+  float pow_val_less1 = native_powr(1-lambda, max(my_recon-1,0)) * (1-epislon);
+  float pow_val_plus1 = native_powr(1-lambda, my_recon+1) * (1-epislon);
+
+  locmem[lid] = my_z_val * my_y_val * my_obs_val * log(1-pow_val)
+    + my_z_val * my_y_val * (1-my_obs_val) * log(pow_val)
+    + my_z_val * (1-my_y_val) * my_obs_val * log(1-pow_val_plus1)
+    + my_z_val * (1-my_y_val) * (1-my_obs_val) * log(pow_val_plus1)
+    + (1-my_z_val) * my_obs_val * log(1-pow_val)
+    + (1-my_z_val) * (1-my_obs_val) * log(pow_val);
+  //printf("n: %d; k: %d; d: %d; z: %d, y: %d, x: %d; recon: %d; lpOff: %f; lpOn: %f\n",
+  //  nth,kth,dth,my_z_val, my_y_val, my_obs_val, my_recon, locmem[1+lid], locmem[1+lid+numRun]);
+}
+  barrier(CLK_LOCAL_MEM_FENCE);
+  if (lid==0) {
+    // TODO: should reduce instead of for loop
+    float lpOnSum = log(theta);
+    int numLoop = min(convert_int(N)-convert_int(numPrevRun),numRun);
+
+    for (int i = 0; i < numLoop; i++) {
+      lpOnSum += locmem[i];
+    }
+
+    //lpOffSum = locmem[3];
+
+
+    //printf("my_y_ind %d; nth: %d, kth: %d, dth: %d; numRun %d:\n",
+    //       my_y_ind, nth, kth, dth, numRun);
+    //printf("nth: %d, kth: %d, dth: %d, cur_lp_off %f; lpOffSum: %f; cur_lp_on %f; lpOnSum: %f\n",
+    //       nth, kth, dth,lp_off[my_y_ind], lpOffSum, lp_on[my_y_ind], lpOnSum);
     lp_on[my_y_ind] = lp_on[my_y_ind] + lpOnSum;
   }
 }
@@ -383,43 +614,45 @@ kernel void calc_z_lps(local float* locmem, global int *cur_y,  global int *cur_
   int my_y_ind = kth*D+dth;
   int my_z_ind = nth*K+kth;
   int myNKInd = nth*K*D + kth*D + dth;
-  
-  int my_obs_val = obs[obs_ind];
-  int my_recon = cur_recon[obs_ind];
-  int my_z_val = cur_z[my_z_ind];
+  if (nth < N) {
+    int my_obs_val = obs[obs_ind];
+    int my_recon = cur_recon[obs_ind];
+    int my_z_val = cur_z[my_z_ind];
 
   /*if (lid == 0) {
     locmem[0] = (float) cur_y[my_y_ind];
   }*/
   //barrier(CLK_LOCAL_MEM_FENCE);
   //int my_y_val = (int) locmem[0];
-  int my_y_val = cur_y[my_y_ind];
-  float pow_val = native_powr(1-lambda, my_recon) * (1-epislon);
-  float pow_val_less1 = native_powr(1-lambda, max(my_recon-1,0))*(1-epislon);
-  float pow_val_plus1 = native_powr(1-lambda, my_recon+1)*(1-epislon);
+    int my_y_val = cur_y[my_y_ind];
+    float pow_val = native_powr(1-lambda, my_recon) * (1-epislon);
+    float pow_val_less1 = native_powr(1-lambda, max(my_recon-1,0))*(1-epislon);
+    float pow_val_plus1 = native_powr(1-lambda, my_recon+1)*(1-epislon);
 
   // lpOff
-  lp_off[myNKInd] = my_z_val * my_y_val * my_obs_val * log(1-pow_val_less1)
-    + my_z_val * my_y_val * (1-my_obs_val) * log(pow_val_less1)
-    + my_z_val * (1-my_y_val) * my_obs_val * log(1-pow_val)
-    + my_z_val * (1-my_y_val) * (1- my_obs_val) * log(pow_val)
-    + (1-my_z_val) * my_obs_val * log(1-pow_val)
-    + (1-my_z_val) * (1-my_obs_val) * log(pow_val);
+    lp_off[myNKInd] = my_z_val * my_y_val * my_obs_val * log(1-pow_val_less1)
+      + my_z_val * my_y_val * (1-my_obs_val) * log(pow_val_less1)
+      + my_z_val * (1-my_y_val) * my_obs_val * log(1-pow_val)
+      + my_z_val * (1-my_y_val) * (1- my_obs_val) * log(pow_val)
+      + (1-my_z_val) * my_obs_val * log(1-pow_val)
+      + (1-my_z_val) * (1-my_obs_val) * log(pow_val);
   // lpOn (it may be possible to write this shorter -- yah, if you focus on my_y_val instead it's easy duh.)
-  lp_on[myNKInd] = my_z_val * my_y_val * my_obs_val * log(1-pow_val)
-    + my_z_val * my_y_val * (1-my_obs_val) * log(pow_val)
-    + my_z_val * (1-my_y_val) * my_obs_val* log(1-pow_val)
-    + my_z_val * (1-my_y_val) * (1-my_obs_val) * log(pow_val)
-    + (1-my_z_val) * my_y_val * my_obs_val * log(1-pow_val_plus1)
-    + (1-my_z_val) * my_y_val * (1-my_obs_val) *log(1-pow_val_plus1)
-    + (1-my_z_val) * (1-my_y_val) * my_obs_val * log(pow_val)
-    + (1-my_z_val) * (1-my_y_val) * (1-my_obs_val) * log(pow_val);
-  if (dth==0) {
-    int mk = z_col_sum[kth];
-    float lpPr = (1.0* mk)/N;
-    lp_off[myNKInd] += log(1-lpPr);
-    lp_on[myNKInd] += log(lpPr);
-
+    lp_on[myNKInd] = my_z_val * my_y_val * my_obs_val * log(1-pow_val)
+      + my_z_val * my_y_val * (1-my_obs_val) * log(pow_val)
+      + my_z_val * (1-my_y_val) * my_obs_val* log(1-pow_val)
+      + my_z_val * (1-my_y_val) * (1-my_obs_val) * log(pow_val)
+      + (1-my_z_val) * my_y_val * my_obs_val * log(1-pow_val_plus1)
+      + (1-my_z_val) * my_y_val * (1-my_obs_val) *log(1-pow_val_plus1)
+      + (1-my_z_val) * (1-my_y_val) * my_obs_val * log(pow_val)
+      + (1-my_z_val) * (1-my_y_val) * (1-my_obs_val) * log(pow_val);
+    if (dth==0) {
+      int mk = z_col_sum[kth];
+      float lpPr = (1.0* mk)/N;
+      lp_off[myNKInd] += log(1-lpPr);
+      lp_on[myNKInd] += log(lpPr);
+    }
+//    printf("n: %d; k: %d: d: %d; myNKInd: %d; my_z_val: %d; my_y_val: %d; lpOn: %f; lpOff: %f\n",
+//            nth, kth, dth, myNKInd, my_z_val, my_y_val, lp_on[myNKInd], lp_off[myNKInd]);
   }
 
   /*this is incorrect bc it's ok for lp_off to be Inf when everyone has taken the feature, you should too.
@@ -432,8 +665,8 @@ kernel void calc_z_lps(local float* locmem, global int *cur_y,  global int *cur_
            lp_on[myNKInd],nth,kth,dth,my_z_val,my_y_val, my_obs_val, my_recon, myNKInd);
   }*/
 
-  //lp_off[myNKInd] = myNKInd;
-  //lp_on[myNKInd] = myNKInd;
+//  lp_off[myNKInd] = myNKInd;
+//  lp_on[myNKInd] = myNKInd;
 }
 //TODO: combine with sample y pre calc to unify these functions...
 kernel void sample_z_pre_calc(global int* cur_z, global float* lp_off, global float* lp_on,
@@ -909,20 +1142,22 @@ kernel void new_y_val_probs2(local int* locmem, global float* cur_z, global floa
   const int NEW_K_START = 0;
   //int dBase = get_global_id(0);
   int lid0 = get_local_id(0); // where in cur dim window
-  int lid1 = get_local_id(1); // which dim window
+  int lid1 = get_global_id(1); // which dim window
   int dth = lid0 + lid1*get_local_size(0); // window size
   int newKth = get_global_id(2);
   
-
   if (dth < D) {
-    int my_obs_idx = nth*D+dth;
+
     // remember 0... new_k are possible values...
     if (lid0 <= new_k) {
       locmem[NEW_K_START + lid0] = comb_vec[lid0];
     }
+  }
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+  barrier(CLK_LOCAL_MEM_FENCE);
 
+  if (dth < D) {
+    int my_obs_idx = nth*D+dth;
     int my_obs_val = obs[my_obs_idx];
     int my_recon_val = obj_recon[my_obs_idx];
     int my_knew_choose_val = locmem[NEW_K_START + newKth];
@@ -931,7 +1166,7 @@ kernel void new_y_val_probs2(local int* locmem, global float* cur_z, global floa
     float pr_pow_val = my_knew_choose_val * native_powr(theta, newKth) * native_powr(1-theta, new_k-newKth);
     
     int my_probs_ind = newKth*D + dth;
-
+    //printf("myprobsind: %d; newkth: %d; dth: %d; lid0: %d; lid1: %d\n")
     new_probs[my_probs_ind] = my_obs_val * (1-lik_pow_val) * pr_pow_val +
       (1-my_obs_val) * lik_pow_val * pr_pow_val;
   }
@@ -999,7 +1234,7 @@ kernel void y_new_samp2(local float* locmem, global float* data,
 //            dth, curNorm, locmem[0]/curNorm, locmem[1]/curNorm, my_rand_val, numToTurnOn);
     //TODO: localify this for loop (these aren't so bad actually bc knew is at max 4)
     for (int i = 0; i < numToTurnOn; i++) {
-      int myInd = (oldK + i) * (oldK + new_k) + dth;
+      int myInd = (oldK + i) * D + dth;
       cur_y[myInd] = 1;
     }
   }

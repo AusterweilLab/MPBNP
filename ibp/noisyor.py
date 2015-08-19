@@ -13,7 +13,8 @@ from MPBNP import BaseSampler, BasePredictor
 from numpy import matlib
 from scipy.special import gammaln
 from scipy.misc import comb
-
+#import pandas as pd
+    
 np.set_printoptions(suppress=True)
 
 #TODO: optimize buffer creation/when data really needs to be initialized
@@ -23,15 +24,15 @@ class Gibbs(BaseSampler):
 
     def __init__(self, cl_mode = True, cl_device = None, record_best = True,
                  alpha = None, lam = 0.99, theta = 0.25, epislon = 0.01,
-                 sim_annealP = True, init_k = 10, T_init=30., anneal_rate = .99,
-                 splitProb = 0.8, split_mergeP = True, split_steps=5,
+                 sim_annealP = True, init_k = 10, T_init=40., anneal_rate = .99,
+                 splitProb = 0.8, split_mergeP = True, split_steps=20,
                  splitAdj = 1/150):
         """Initialize the class.
         """
         BaseSampler.__init__(self, cl_mode = cl_mode, cl_device = cl_device, record_best = record_best)
 
         np.set_printoptions(precision=3)
-        
+
         if cl_mode:
             program_str = open(pkg_dir + 'MPBNP/ibp/kernels/ibp_noisyor_cl.c', 'r').read()
             self.prg = cl.Program(self.ctx, program_str).build()
@@ -44,7 +45,7 @@ class Gibbs(BaseSampler):
                         get_work_group_info(cl.kernel_work_group_info.PREFERRED_WORK_GROUP_SIZE_MULTIPLE, self.device)
             self.k_max_new = 4
 
-            
+
         self.alpha = alpha # tendency to generate new features
         self.k = init_k    # initial number of features
         self.theta = theta # prior probability that a pixel is on in a feature image
@@ -62,29 +63,42 @@ class Gibbs(BaseSampler):
         self.split_mergeP = split_mergeP
         self.split_steps = split_steps
         self.splitAdj = splitAdj
-        
+        self.float_size = np.array(1,dtype=np.float32).nbytes
+        self.int_size = np.array(1,dtype=np.int32).nbytes
+
     def read_csv(self, filepath, header=True):
         """Read the data from a csv file.
         """
-        BaseSampler.read_csv(self, filepath, header)
-        # convert the data to floats
-        self.new_obs = []
-        self.img_w, self.img_h = None, None
-        for row in self.obs:
-            if self.img_w is None:
-                self.img_w = int(row[0])
-                if self.img_w == 0 or (len(row)-1) % self.img_w != 0:
-                    raise Exception('The sampler does not understand the format of the data. Did you forget to specify image width in the data file?')
-            self.new_obs.append([int(_) for _ in row])
+        if use_pandas:
+            BaseSampler.read_csv(self, filepath, header=False)
+            self.img_w, self.img_h = None, None
+            self.img_w = self.obs[0,0]
+            self.img_h = self.obs.shape[1] // self.img_w
 
-            self.obs = np.array(self.new_obs)[:,1:]
-        if self.cl_mode:
-            self.d_obs = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf=self.obs.astype(np.int32))
+            if (self.obs.shape[1]-1) % self.img_w != 0:
+                raise Exception('The sampler does not understand the format of the data. Did you forget to specify image width in the data file?')
+            self.obs = np.require(self.obs[:,1:], dtype=np.int32, requirements=['C','A'])
+            if self.cl_mode:
+                self.d_obs = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf=self.obs.astype(np.int32))
+
+        else:
+            BaseSampler.read_csv(self, filepath, header)
+            # convert the data to floats
+            for row in self.obs:
+                if self.img_w is None:
+                    self.img_w = int(row[0])
+                    if self.img_w == 0 or (len(row)-1) % self.img_w != 0:
+                        raise Exception('The sampler does not understand the format of the data. Did you forget to specify image width in the data file?')
+                self.new_obs.append([int(_) for _ in row])
+
+                self.obs = np.array(self.new_obs)[:,1:]
+            if self.cl_mode:
+                self.d_obs = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf=self.obs.astype(np.int32))
 
         self.d = self.obs.shape[1]
         self.img_h = int(self.d / self.img_w)
         #self.alpha = float(self.N) * 5
-        self.alpha = np.log(float(self.N)) 
+        self.alpha = np.log(float(self.N))
         return
 
     def direct_read_obs(self, obs,img_w=None):
@@ -150,7 +164,7 @@ class Gibbs(BaseSampler):
                 np.savetxt(output_file, final_z, fmt="%d", comments='', delimiter=',',
                            header=','.join(['feature%d' % _ for _ in range(num_of_feats)]))
 
-                for k in xrange(num_of_feats):
+                for k in np.arange(num_of_feats):
                     print('Feature %d\n---------' % k, file = output_file)
                     np.savetxt(output_file, final_y[k].reshape(self.img_w, self.img_h),
                                fmt="%d", delimiter=',')
@@ -176,7 +190,7 @@ class Gibbs(BaseSampler):
                            fmt="%d", comments='', delimiter=',',
                            header=','.join(['feature%d' % _ for _ in range(num_of_feats)]))
 
-                for k in xrange(num_of_feats):
+                for k in np.arange(num_of_feats):
                     np.savetxt(gzip.open(output_file + 'feature_%d_image.csv.gz' % k, 'w'),
                                final_y[k].reshape(self.img_w, self.img_h), fmt="%d", delimiter=',')
             else:
@@ -387,8 +401,6 @@ class Gibbs(BaseSampler):
         """
         cur_y = init_y.astype(np.int32)
         cur_z = init_z.astype(np.int32)
-        self.tmp_y = cur_y
-        self.tmp_z = cur_z
         # cur_y = np.require(np.array([[0, 0, 1, 1],[1,1,0,0]], dtype=np.int32),
         #                    dtype=np.int32, requirements=['C','A'])
         # cur_z = np.require(np.array([[1, 0], [1, 0],
@@ -409,6 +421,9 @@ class Gibbs(BaseSampler):
         #                              [0, 1], [0, 1]], dtype=np.int32),
         #                    dtype=np.int32, requirements=['C','A'])
         # self.k = 2
+        self.tmp_y = cur_y
+        self.tmp_z = cur_z
+
         debugP = False
 
         d_cur_y = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = cur_y.astype(np.int32))
@@ -437,7 +452,10 @@ class Gibbs(BaseSampler):
                     print(self.tmp_y)
                     print("cur_z")
                     print(self.tmp_z)
-                d_cur_y = self._cl_infer_y(d_cur_y, d_cur_z)
+                if self.N < 201:
+                    d_cur_y = self._cl_infer_y(d_cur_y, d_cur_z)
+                else:
+                    d_cur_y = self._cl_infer_y2(d_cur_y, d_cur_z)
                 if debugP:
                     cl.enqueue_copy(self.queue, self.tmp_z, d_cur_z)
                     cl.enqueue_copy(self.queue, self.tmp_y, d_cur_y)
@@ -497,10 +515,15 @@ class Gibbs(BaseSampler):
             N = self.obs.shape[0]
             D = self.obs.shape[1]
 
-            d_obj_recon = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR,
-                                    hostbuf = np.require(np.zeros(shape = self.obs.shape, dtype=np.int32),
-                                                         dtype = np.int32, requirements=['C','A']))
-    
+            # d_obj_recon = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR,
+            #                         hostbuf = np.require(np.zeros(shape = self.obs.shape, dtype=np.int32),
+            #                                              dtype = np.int32, requirements=['C','A']))
+
+            d_obj_recon = cl.Buffer(self.ctx, self.mf.READ_WRITE,size=(N*D*np.dtype('int32').itemsize))
+
+            self.prg.init_bufferInt(self.queue, (N*D,1), None, d_obj_recon, np.int32(N*D), np.int32(0))
+
+
             self.prg.compute_recon_objs(self.queue, (N, K, D), None,
                                     d_cur_y, d_cur_z, d_obj_recon,
                                     np.int32(N), np.int32(D), np.int32(K))
@@ -508,12 +531,15 @@ class Gibbs(BaseSampler):
             d_rand = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR,
                                hostbuf=np.random.random(size = (K, D)).astype(np.float32))
 
-            d_lp_off = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR,
-                                 hostbuf = np.require(np.zeros(shape = (K, D), dtype=np.float32),
-                                                      dtype = np.float32, requirements=['C','A']))
-            d_lp_on = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR,
-                                hostbuf = np.require(np.zeros(shape = (K, D), dtype=np.float32),
-                                                    dtype = np.float32, requirements=['C','A']))
+            d_lp_off = cl.Buffer(self.ctx, self.mf.READ_WRITE,size=(K*D*np.dtype('float32').itemsize))
+            # hostbuf = np.require(np.zeros(shape = (K, D), dtype=np.float32),
+            #                      dtype = np.float32, requirements=['C','A']))
+            d_lp_on = cl.Buffer(self.ctx, self.mf.READ_WRITE,size=(K*D*np.dtype('float32').itemsize))
+
+            self.prg.init_2bufferFlt(self.queue, (K*D,1), None, d_lp_off, d_lp_on, np.int32(K*D), np.float32(0.))
+
+            # hostbuf = np.require(np.zeros(shape = (K, D), dtype=np.float32),
+            #                     dtype = np.float32, requirements=['C','A']))
 
             # d_lp_off2 = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR,
             #                      hostbuf = np.require(np.zeros(shape = (K, D), dtype=np.float32),
@@ -528,12 +554,12 @@ class Gibbs(BaseSampler):
             workGroupSize = int(min(maxLocalMem//np.dtype(np.float32).itemsize, maxWorkGroupSize))
             tmpLocMemNPFlt = np.empty(workGroupSize,dtype=np.float32)
             d_locmemFlt = cl.LocalMemory(tmpLocMemNPFlt.nbytes)
-            curNumToRun = min(workGroupSize, N)
+            curNumToRun = min(int(workGroupSize/2), N)
             numToRun = N
             numPrevRun = 0
             #TODO: this could be made faster... 
             while numToRun > 0:
-                self.prg.calc_y_lps(self.queue, (curNumToRun,K,D), (curNumToRun, 1,1), d_locmemFlt, d_cur_y, d_cur_z,
+                self.prg.calc_y_lps_old(self.queue, (curNumToRun,K,D), (curNumToRun, 1,1), d_locmemFlt, d_cur_y, d_cur_z,
                                     d_obj_recon, self.d_obs, d_lp_off, d_lp_on,
                                     np.int32(N), np.int32(D), np.int32(K), np.int32(numPrevRun),
                                     np.float32(self.lam), np.float32(self.epislon), np.float32(self.theta))
@@ -562,7 +588,97 @@ class Gibbs(BaseSampler):
             self.prg.sample_y_pre_calc(self.queue, (K,D, 1), None, d_cur_y, d_lp_off, d_lp_on,
                                        d_rand, np.int32(K), np.int32(D))
         return d_cur_y
+
+
+    def _cl_infer_y2(self, d_cur_y, d_cur_z):
+        """Infer feature images
+        """
+
+        K = self.k
+
+        if K > 0:
         
+            N = self.obs.shape[0]
+            D = self.obs.shape[1]
+
+            # d_obj_recon = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR,
+            #                         hostbuf = np.require(np.zeros(shape = self.obs.shape, dtype=np.int32),
+            #                                              dtype = np.int32, requirements=['C','A']))
+
+            d_obj_recon = cl.Buffer(self.ctx, self.mf.READ_WRITE, size=(N*D*np.dtype('int32').itemsize))
+
+            self.prg.init_bufferInt(self.queue, (N*D,1), None, d_obj_recon, np.int32(N*D), np.int32(0))
+
+            self.prg.compute_recon_objs(self.queue, (N, K, D), None,
+                                    d_cur_y, d_cur_z, d_obj_recon,
+                                    np.int32(N), np.int32(D), np.int32(K))
+
+            d_rand = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR,
+                               hostbuf=np.random.random(size = (K, D)).astype(np.float32))
+            #buff_size = (self.tmp_y.astype(np.float32)).nbytes
+            d_lp_off = cl.Buffer(self.ctx, self.mf.READ_WRITE,size=(K*D*np.dtype('float32').itemsize))
+            # hostbuf = np.require(np.zeros(shape = (K, D), dtype=np.float32),
+            #                      dtype = np.float32, requirements=['C','A']))
+            d_lp_on = cl.Buffer(self.ctx, self.mf.READ_WRITE,size=(K*D*np.dtype('float32').itemsize))
+
+            self.prg.init_2bufferFlt(self.queue, (K*D,1), None, d_lp_off,d_lp_on, np.int32(K*D), np.float32(0.))
+            # hostbuf = np.require(np.zeros(shape = (K, D), dtype=np.float32),
+            #                     dtype = np.float32, requirements=['C','A']))
+
+            # d_lp_off2 = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR,
+            #                      hostbuf = np.require(np.zeros(shape = (K, D), dtype=np.float32),
+            #                                           dtype = np.float32, requirements=['C','A']))
+            # d_lp_on2 = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR,
+            #                     hostbuf = np.require(np.zeros(shape = (K, D), dtype=np.float32),
+            #                                         dtype = np.float32, requirements=['C','A']))
+            
+            maxWorkGroupSize = np.int32(self.device.max_work_group_size/2)
+            maxLocalMem = self.device.local_mem_size
+
+            workGroupSize = int(min(maxLocalMem//np.dtype(np.float32).itemsize, maxWorkGroupSize))
+            tmpLocMemNPFlt = np.empty(workGroupSize,dtype=np.float32)
+            d_locmemFlt = cl.LocalMemory(tmpLocMemNPFlt.nbytes)
+            curNumToRun = min(int(workGroupSize/2), N)
+            numToRun = N
+            numPrevRun = 0
+            #TODO: this could be made faster... 
+            while numToRun > 0:
+                #issues when I don't split them....
+                self.prg.calc_y_lp_off(self.queue, (curNumToRun,K,D), (curNumToRun, 1,1), d_locmemFlt, d_cur_y, d_cur_z,
+                                    d_obj_recon, self.d_obs, d_lp_off, 
+                                    np.int32(N), np.int32(D), np.int32(K), np.int32(numPrevRun),
+                                    np.float32(self.lam), np.float32(self.epislon), np.float32(self.theta))
+                self.prg.calc_y_lp_on(self.queue, (curNumToRun,K,D), (curNumToRun, 1,1), d_locmemFlt, d_cur_y, d_cur_z,
+                                    d_obj_recon, self.d_obs, d_lp_on,
+                                    np.int32(N), np.int32(D), np.int32(K), np.int32(numPrevRun),
+                                    np.float32(self.lam), np.float32(self.epislon), np.float32(self.theta))
+
+                # self.prg.calc_y_lps_noLcl(self.queue, (curNumToRun,K,D), (curNumToRun, 1,1), d_locmemFlt, d_cur_y, d_cur_z,
+                #                     d_obj_recon, self.d_obs, d_lp_off2, d_lp_on2,
+                #                     np.int32(N), np.int32(D), np.int32(K), np.int32(numPrevRun),
+                #                     np.float32(self.lam), np.float32(self.epislon), np.float32(self.theta))
+                numToRun -= curNumToRun
+                numPrevRun += curNumToRun
+
+
+
+            # check_y_lps_on = np.require(np.zeros(shape = (K, D), dtype=np.float32),
+            #                                            dtype = np.float32, requirements=['C','A'])
+            # check_y_lps_off = np.require(np.zeros(shape = (K, D), dtype=np.float32),
+            #                                            dtype = np.float32, requirements=['C','A'])
+            # cl.enqueue_copy(self.queue,check_y_lps_off, d_lp_off)
+            # cl.enqueue_copy(self.queue,check_y_lps_on, d_lp_on)
+            # #
+            # check_y_lps_on2 = np.require(np.zeros(shape = (K, D), dtype=np.float32),
+            #                                           dtype = np.float32, requirements=['C','A'])
+            # check_y_lps_off2 = np.require(np.zeros(shape = (K, D), dtype=np.float32),
+            #                                           dtype = np.float32, requirements=['C','A'])
+            # cl.enqueue_copy(self.queue,check_y_lps_off2, d_lp_off2)
+            # cl.enqueue_copy(self.queue,check_y_lps_on2, d_lp_on2)
+            self.prg.sample_y_pre_calc(self.queue, (K,D, 1), None, d_cur_y, d_lp_off, d_lp_on,
+                                       d_rand, np.int32(K), np.int32(D))
+        return d_cur_y
+
         # self.prg.sample_yJLA(self.queue, (N,K,D), (N, 1,1), d_locmemFlt, d_cur_y, d_cur_z,
         #                      d_z_by_y, self.d_obs, d_rand, np.int32(N), np.int32(D), np.int32(K),
         #                      np.float32(self.lam), np.float32(self.epislon), np.float32(self.theta))
@@ -590,27 +706,38 @@ class Gibbs(BaseSampler):
         K = self.k
 
         if K > 0:
-            d_obj_recon = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR,
-                                    hostbuf = np.require(np.zeros(shape = self.obs.shape, dtype=np.int32),
-                                                         dtype = np.int32, requirements=['C','A']))
-            
-            d_z_col_sum = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, 
-                                    hostbuf = np.require(np.zeros(shape = (K,1), dtype=np.int32),
-                                                         dtype = np.int32, requirements=['C','A']))
-        
-            
+            # d_obj_recon = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR,
+            #                         hostbuf = np.require(np.zeros(shape = self.obs.shape, dtype=np.int32),
+            #                                              dtype = np.int32, requirements=['C','A']))
+            d_obj_recon = cl.Buffer(self.ctx, self.mf.READ_WRITE,size=(N*D*np.dtype('int32').itemsize))
+
+            self.prg.init_bufferInt(self.queue, (N*D,1), None, d_obj_recon, np.int32(N*D), np.int32(0))
+
+            #d_obj_recon = cl.Buffer(self.ctx, self.mf.READ_WRITE, size=(N*D*np.dtype('int32').itemsize))
+
+            d_z_col_sum = cl.Buffer(self.ctx, self.mf.READ_WRITE, size=(K*np.dtype('int32').itemsize))        
+            self.prg.init_bufferInt(self.queue, (K,1), None, d_z_col_sum, np.int32(K), np.int32(0))
             self.prg.compute_recon_objs_andzsums(self.queue, (N, K, D), None,
                                                  d_cur_y, d_cur_z, d_obj_recon, d_z_col_sum,
                                                  np.int32(N), np.int32(D), np.int32(K))
 
-            d_lp_off = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR,
-                                 hostbuf = np.require(np.zeros(shape = (N,K,D), dtype=np.float32),
-                                                      dtype = np.float32, requirements=['C','A']))
-            
-            d_lp_on = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR,
-                                hostbuf = np.require(np.zeros(shape = (N,K,D), dtype=np.float32),
-                                                     dtype = np.float32, requirements=['C','A']))
 
+            # to_get_size = np.require(np.zeros(shape = (N,K,D), dtype=np.float32),
+            #                          dtype=np.float32, requirements=['C','A'])
+            #d_lp_off = cl.Buffer(self.ctx, self.mf.READ_WRITE, size = to_get_size.nbytes)
+            #d_lp_on = cl.Buffer(self.ctx, self.mf.READ_WRITE, size = to_get_size.nbytes)
+            # d_lp_off = cl.Buffer(self.ctx, self.mf.READ_WRITE |self.mf.COPY_HOST_PTR, hostbuf=to_get_size)
+            # d_lp_on = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf=to_get_size)
+
+            d_lp_off = cl.Buffer(self.ctx, self.mf.READ_WRITE, size=(N*K*D*np.dtype('float32').itemsize))
+            d_lp_on = cl.Buffer(self.ctx, self.mf.READ_WRITE, size=(N*K*D*np.dtype('float32').itemsize))
+
+            self.prg.init_2bufferFlt(self.queue, (N*K*D,1), None, d_lp_off,d_lp_on, np.int32(N*K*D), np.float32(0.))
+
+            # lpoffdebug = np.require(np.zeros(shape = (N,K,D), dtype=np.float32),
+            #                                           dtype = np.float32, requirements=['C','A'])
+            # lpondebug = np.require(np.zeros(shape = (N,K,D), dtype=np.float32),
+            #                                           dtype = np.float32, requirements=['C','A'])
             maxWorkGroupSize = np.int32(self.device.max_work_group_size/2)
             maxLocalMem = self.device.local_mem_size
 
@@ -630,11 +757,13 @@ class Gibbs(BaseSampler):
                 numToRun -= curNumToRun
                 numPrevRun += curNumToRun
 
-            lp_off = np.zeros(shape=(N,K, D), dtype=np.float32)
-            lp_on = np.zeros(shape=(N,K, D), dtype=np.float32)
-            cl.enqueue_copy(self.queue, lp_off, d_lp_off)
-            cl.enqueue_copy(self.queue,lp_on,d_lp_on)
+            # lp_off = np.zeros(shape=(N,K, D), dtype=np.float32)
+            # lp_on = np.zeros(shape=(N,K, D), dtype=np.float32)
+            # cl.enqueue_copy(self.queue, lp_off, d_lp_off)
+            # cl.enqueue_copy(self.queue,lp_on,d_lp_on)
 
+            # cl.enqueue_copy(self.queue, lpoffdebug, d_lp_off)
+            # cl.enqueue_copy(self.queue, lpondebug, d_lp_on)
 
 
             #TODO: rewrite for float4s
@@ -653,29 +782,26 @@ class Gibbs(BaseSampler):
             #
 
             num_loop = int(math.ceil(D/workGroupSize))
-            d_lp_off_tmp = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR,
-                                     hostbuf = np.require(np.zeros(shape = (N,K,D), dtype=np.float32),
-                                                          dtype = np.float32, requirements=['C','A']))
+            d_lp_off_tmp = cl.Buffer(self.ctx, self.mf.READ_WRITE,size=(N*K*D*np.dtype('float32').itemsize))
+            
+            d_lp_on_tmp = cl.Buffer(self.ctx, self.mf.READ_WRITE, size=(N*K*D*np.dtype('float32').itemsize))
+            cl.enqueue_copy(self.queue, d_lp_off_tmp, d_lp_off)
+            cl.enqueue_copy(self.queue,d_lp_on_tmp, d_lp_on)
 
-            d_lp_on_tmp = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR,
-                                    hostbuf = np.require(np.zeros(shape = (N,K,D), dtype=np.float32),
-                                                         dtype = np.float32, requirements=['C','A']))
 
-            lpoffdebug = np.require(np.zeros(shape = (N,K,D), dtype=np.float32),
-                                                      dtype = np.float32, requirements=['C','A'])
-            lpondebug = np.require(np.zeros(shape = (N,K,D), dtype=np.float32),
-                                                      dtype = np.float32, requirements=['C','A'])
+            # self.prg.init_2bufferFlt(self.queue, (N*K*D,1), None,
+            #                          d_lp_off_tmp,d_lp_on_tmp, np.int32(N*K*D), np.float32(0.))
+
             # lpoffdebug2 = np.require(np.zeros(shape = (N,K,D), dtype=np.float32),
             #                                            dtype = np.float32, requirements=['C','A'])
             # lpondebug2 = np.require(np.zeros(shape = (N,K,D), dtype=np.float32),
             #                                            dtype = np.float32, requirements=['C','A'])
-            lpoffdebug3 = np.require(np.zeros(shape = (N,K,D), dtype=np.float32),
-                                                      dtype = np.float32, requirements=['C','A'])
-            lpondebug3 = np.require(np.zeros(shape = (N,K,D), dtype=np.float32),
-                                                      dtype = np.float32, requirements=['C','A'])
-            cl.enqueue_copy(self.queue, lpoffdebug, d_lp_off)
+            # lpoffdebug3 = np.require(np.zeros(shape = (N,K,D), dtype=np.float32),
+            #                                           dtype = np.float32, requirements=['C','A'])
+            # lpondebug3 = np.require(np.zeros(shape = (N,K,D), dtype=np.float32),
+            #                                           dtype = np.float32, requirements=['C','A'])
+
             # # cl.enqueue_copy(self.queue, lpoffdebug2, d_lp_off_tmp)
-            cl.enqueue_copy(self.queue, lpondebug, d_lp_on)
             # # cl.enqueue_copy(self.queue, lpondebug2, d_lp_on_tmp)
 
             while (curNumToReduce > workGroupSize):
@@ -729,8 +855,8 @@ class Gibbs(BaseSampler):
                                             np.int32(N), np.int32(K), np.int32(D),
                                             np.int32(min(D,curNumToReduce)))
 
-            cl.enqueue_copy(self.queue, lpoffdebug3, d_lp_off)
-            cl.enqueue_copy(self.queue, lpondebug3, d_lp_on)
+            # cl.enqueue_copy(self.queue, lpoffdebug3, d_lp_off)
+            # cl.enqueue_copy(self.queue, lpondebug3, d_lp_on)
 
 
             d_rand = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR,
@@ -741,7 +867,6 @@ class Gibbs(BaseSampler):
 
         return d_cur_z
 
-        
     def _cl_infer_k_new(self, cur_y, cur_z):
 
         # sample new features use importance sampling
@@ -816,9 +941,14 @@ class Gibbs(BaseSampler):
         obj_recon = None
         #sample new features. 1st recon!
 
-        d_obj_recon = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR,
-                                hostbuf = np.require(np.zeros(shape = self.obs.shape, dtype=np.int32),
-                                                     dtype = np.int32, requirements=['C','A']))
+        # d_obj_recon = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR,
+        #                         hostbuf = np.require(np.zeros(shape = self.obs.shape, dtype=np.int32),
+        #                                              dtype = np.int32, requirements=['C','A']))
+
+        d_obj_recon = cl.Buffer(self.ctx, self.mf.READ_WRITE,size=(N*D*np.dtype('int32').itemsize))
+
+        self.prg.init_bufferInt(self.queue, (N*D,1), None, d_obj_recon, np.int32(N*D), np.int32(0))
+
         if cur_z.size is 0:
             obj_recon = np.zeros(self.obs.shape)
         else:
@@ -833,9 +963,9 @@ class Gibbs(BaseSampler):
                                     np.int32(N), np.int32(D), np.int32(K))
        
         
-            obj_recon = np.require(np.zeros(shape = self.obs.shape, dtype=np.int32),
-                               dtype = np.int32, requirements=['C','A'])
-            cl.enqueue_copy(self.queue, obj_recon,d_obj_recon)
+            # obj_recon = np.require(np.zeros(shape = self.obs.shape, dtype=np.int32),
+            #                    dtype = np.int32, requirements=['C','A'])
+            #cl.enqueue_copy(self.queue, obj_recon,d_obj_recon)
         #print("Current Object Reconstruction:")
         #print(obj_recon)
 
@@ -1054,9 +1184,6 @@ class Gibbs(BaseSampler):
         cur_z = cur_z[:,active_feat_col[0]].astype(np.int32)
         cur_y = cur_y[active_feat_col[0],:].astype(np.int32)
 
-        # update self.k
-        self.k = cur_z.shape[1]
-
         z_s0, z_s1 = cur_z.shape
         cur_z = cur_z.reshape((z_s0 * z_s1, 1))
         cur_z = np.require(cur_z.reshape((z_s0, z_s1)), dtype=np.int32, requirements=['C','A'])
@@ -1065,6 +1192,9 @@ class Gibbs(BaseSampler):
         cur_y = cur_y.reshape((y_s0 * y_s1, 1))
         cur_y = np.require(cur_y.reshape((y_s0, y_s1)), dtype=np.int32, requirements=['C','A'])
 
+        # update self.k
+        self.k = cur_z.shape[1]
+
         N = self.obs.shape[0]
         K = cur_z.shape[1]
         D = self.obs.shape[1]
@@ -1072,9 +1202,13 @@ class Gibbs(BaseSampler):
         obj_recon = None
         #sample new features. 1st recon!
 
-        d_obj_recon = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR,
-                                hostbuf = np.require(np.zeros(shape = self.obs.shape, dtype=np.int32),
-                                                     dtype = np.int32, requirements=['C','A']))
+        # d_obj_recon = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR,
+        #                         hostbuf = np.require(np.zeros(shape = self.obs.shape, dtype=np.int32),
+        #                                              dtype = np.int32, requirements=['C','A']))
+        d_obj_recon = cl.Buffer(self.ctx, self.mf.READ_WRITE,size=(N*D*np.dtype('int32').itemsize))
+
+        self.prg.init_bufferInt(self.queue, (N*D,1), None, d_obj_recon, np.int32(N*D), np.int32(0))
+
         if cur_z.size is 0:
             obj_recon = np.zeros(self.obs.shape)
         else:
@@ -1087,13 +1221,16 @@ class Gibbs(BaseSampler):
                                     d_cur_y, d_cur_z, d_obj_recon,
                                     np.int32(N), np.int32(D), np.int32(K))
               
-            obj_recon = np.require(np.zeros(shape = self.obs.shape, dtype=np.int32),
-                               dtype = np.int32, requirements=['C','A'])
-            cl.enqueue_copy(self.queue, obj_recon,d_obj_recon)
+            # obj_recon = np.require(np.zeros(shape = self.obs.shape, dtype=np.int32),
+            #                    dtype = np.int32, requirements=['C','A'])
+            # cl.enqueue_copy(self.queue, obj_recon,d_obj_recon)
         
-        lps = np.require(np.zeros((N,D,self.k_max_new+1), dtype=np.float32), dtype=np.float32, requirements=['C','A'])
-        d_lps = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR,
-                          hostbuf=lps.astype(np.float32))
+        lps = np.require(np.empty((N,D,self.k_max_new+1), dtype=np.float32),
+                         dtype=np.float32, requirements=['C','A'])
+        d_lps = cl.Buffer(self.ctx, self.mf.READ_WRITE,size=(N*D*(self.k_max_new+1)*np.dtype('float32').itemsize))
+        # self.prg.init_bufferFlt(self.queue, (N*D*(self.k_max_new+1),1), None, d_lps,
+        #                         np.int32(N*D*(self.k_max_new+1)), np.float32(0.))
+        #                  hostbuf=lps.astype(np.float32))
         #TODO: localify k_max_new to share some values
         self.prg.calc_lp_fornew(self.queue, (N, D, self.k_max_new+1), None,
                                 d_obj_recon, self.d_obs, d_lps,
@@ -1126,6 +1263,7 @@ class Gibbs(BaseSampler):
 
             cur_y = np.require(np.vstack((cur_y, np.zeros(shape=(new_k,D), dtype=np.int32))),
                                dtype=np.int32, requirements=['C', 'A'])
+
             oldK = K
             K += new_k
 
@@ -1134,21 +1272,21 @@ class Gibbs(BaseSampler):
                                 hostbuf = cur_z.astype(np.int32))
             d_cur_y = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR,
                                 hostbuf = cur_y.astype(np.int32))
-            d_knews = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR,
-                                hostbuf = knews.astype(np.int32))
+            # d_knews = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR,
+            #                     hostbuf = knews.astype(np.int32))
             #for ensuring z & y are proper size later, but only reallocating as necessary
-            self.tmp_z = np.require(np.zeros(shape=(N,K), dtype=np.int32),
-                                         dtype=np.int32, requirements=['C','A'])
-            self.tmp_y = np.require(np.zeros(shape=(K,D), dtype=np.int32),
-                                         dtype=np.int32, requirements=['C','A'])
+            self.tmp_z = cur_z
+            self.tmp_y = cur_y
             comb_vec = np.require(comb(new_k, np.arange(new_k+1)),
                                   dtype=np.int32, requirements=['C','A'])
             d_comb_vec = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR,
                                    hostbuf=comb_vec.astype(np.int32))
-            new_y_val_probs = np.require(np.empty(shape=(new_k+1,D), dtype=np.float32),
-                                         dtype=np.float32, requirements=['C','A'])
-            d_new_y_val_probs = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR,
-                                          hostbuf = new_y_val_probs.astype(np.float32))
+            # new_y_val_probs = np.require(np.empty(shape=(new_k+1,D), dtype=np.float32),
+            #                              dtype=np.float32, requirements=['C','A'])
+            d_new_y_val_probs = cl.Buffer(self.ctx, self.mf.READ_WRITE,
+                                          size=((new_k+1)*D*np.dtype('float32').itemsize))
+            #hostbuf = new_y_val_probs.astype(np.float32))
+
             # call gpu-based function to create the new features...
             maxWorkGroupSize = np.int32(self.device.max_work_group_size/2)
             maxLocalMem = self.device.local_mem_size
@@ -1165,7 +1303,7 @@ class Gibbs(BaseSampler):
                                       np.float32(self.lam), np.float32(self.epislon), np.float32(self.theta))
         
 
-            cl.enqueue_copy(self.queue, new_y_val_probs, d_new_y_val_probs)
+            #cl.enqueue_copy(self.queue, new_y_val_probs, d_new_y_val_probs)
 
             y_rand_vals = np.require(np.random.random((D)), dtype=np.float32,
                                  requirements=['C', 'A'])
@@ -1179,7 +1317,7 @@ class Gibbs(BaseSampler):
                                 np.int32(new_k_ind), np.int32(new_k),
                                 np.int32(N), np.int32(D), np.int32(oldK))
             
-            cl.enqueue_copy(self.queue, cur_y, d_cur_y)
+            #cl.enqueue_copy(self.queue, cur_y, d_cur_y)
             #
             # print("cur_y:")
             # print(cur_y)
@@ -1189,10 +1327,8 @@ class Gibbs(BaseSampler):
             #
             # print("cur_z:")
             # print(cur_z)
-            # print(cur_z.shape)
+            # print(cur_z.shape)            #print("inferring zs for new features: ")
 
-#            quit()
-            #print("inferring zs for new features: ")
             d_cur_z = self._cl_infer_z(d_cur_y, d_cur_z)
         
         
@@ -1201,18 +1337,11 @@ class Gibbs(BaseSampler):
             # cur_y = cur_y[non_empty_feat_img[0],:].astype(np.int32)
             # cur_z = cur_z[:,non_empty_feat_img[0]].astype(np.int32)
         
-        #print("new sampled cur_y: ")
-        #print(cur_y)
-       # print("new sampled z: ")
-       # print(cur_z)
-       # print("cur_y.shape:%d, %d, cur_z.shape %d, %d" %(cur_y.shape[0], cur_y.shape[1], cur_z.shape[0], cur_z.shape[1]))
-       # print(np.dot(cur_z,cur_y))
-
         if self.k is not startK:
             self.tmp_z = np.require(np.zeros(shape=(N,self.k), dtype=np.int32),
-                                         dtype=np.int32, requirements=['C','A'])
+                                             dtype=np.int32, requirements=['C','A'])
             self.tmp_y = np.require(np.zeros(shape=(self.k,D), dtype=np.int32),
-                                         dtype=np.int32, requirements=['C','A'])
+                                             dtype=np.int32, requirements=['C','A'])
 
         self.gpu_time += time() - a_time
 
@@ -1262,7 +1391,10 @@ class Gibbs(BaseSampler):
                 d_samp_y = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR,
                                           hostbuf = y_samp.astype(np.int32))
                 self.k = K+1 #remember to set k back to K if we reject
-                d_samp_y = self._cl_infer_y(d_samp_y, d_samp_z)
+                if self.N <= 200:
+                    d_samp_y = self._cl_infer_y(d_samp_y, d_samp_z)
+                else:
+                    d_samp_y = self._cl_infer_y2(d_samp_y, d_samp_z)
                 d_samp_z = self._cl_infer_z(d_samp_y, d_samp_z)
                 #cl.enqueue_copy(self.queue, z_samp, d_samp_z)
                 #cl.enqueue_copy(self.queue, y_samp, d_samp_y)
@@ -1293,9 +1425,10 @@ class Gibbs(BaseSampler):
                     #accept
                     d_cur_y = d_samp_y
                     d_cur_z = d_samp_z
-            else:
-                #merge proposal
+            elif K > 2:
+                #merge proposal (figure out why K=2 has problems)
                 #pick two features
+                #print("trying to merge with K: %d" % K)
                 k_inds = np.random.choice(np.arange(K),size=2,p=p_ms,replace=False)
                 #form merged
                 z_samp = np.copy(cur_z)
@@ -1311,7 +1444,11 @@ class Gibbs(BaseSampler):
                                           hostbuf = z_samp.astype(np.int32))
                 d_samp_y = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR,
                                           hostbuf = y_samp.astype(np.int32))
-                d_samp_y = self._cl_infer_y(d_samp_y, d_samp_z)
+
+                if self.N <= 200:
+                    d_samp_y = self._cl_infer_y(d_samp_y, d_samp_z)
+                else:
+                    d_samp_y = self._cl_infer_y2(d_samp_y, d_samp_z)
                 self.tmp_y = np.require(np.zeros(shape=(self.k,D),dtype=np.int32), dtype=np.int32,
                                         requirements=['C', 'A'])
                 self.tmp_z = np.require(np.zeros(shape=(N,self.k),dtype=np.int32), dtype=np.int32,
@@ -1371,8 +1508,8 @@ class Gibbs(BaseSampler):
             d_cur_y, d_cur_z = sample
 
             #for debugging on aug 14 2015
-            cl.enqueue_copy(self.queue, self.tmp_y, d_cur_y)
-            cl.enqueue_copy(self.queue, self.tmp_z, d_cur_z)
+            #cl.enqueue_copy(self.queue, self.tmp_y, d_cur_y)
+            #cl.enqueue_copy(self.queue, self.tmp_z, d_cur_z)
 
             N = self.obs.shape[0]
             D = self.obs.shape[1]
@@ -1383,29 +1520,40 @@ class Gibbs(BaseSampler):
             mks = np.require(np.zeros(shape = (K,1), dtype=np.int32),
                              dtype = np.int32, requirements=['C','A'])
 
-            d_obj_recon = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR,
-                                    hostbuf = np.require(np.zeros(shape = self.obs.shape, dtype=np.int32),
-                                                         dtype = np.int32, requirements=['C','A']))
-            d_z_col_sum = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR,
-                                    hostbuf = mks)
+            # d_obj_recon = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR,
+            #                         hostbuf = np.require(np.zeros(shape = self.obs.shape, dtype=np.int32),
+            #                                              dtype = np.int32, requirements=['C','A']))
+            d_z_col_sum = cl.Buffer(self.ctx, self.mf.READ_WRITE,size=(K*np.dtype('int32').itemsize))
 
-            d_lps = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR,
-                                    hostbuf = np.require(np.zeros(shape = (N, D), dtype=np.float32),
-                                                         dtype = np.float32, requirements=['C','A']))
+            #TODO: write 2buffer where buffers can have different sizes
+            self.prg.init_bufferInt(self.queue, (K,1), None, d_z_col_sum, np.int32(K), np.int32(0))
 
+            d_obj_recon = cl.Buffer(self.ctx, self.mf.READ_WRITE,size=(N*D*np.dtype('int32').itemsize))
+
+            self.prg.init_bufferInt(self.queue, (N*D,1), None, d_obj_recon, np.int32(N*D), np.int32(0))
+
+            # d_z_col_sum = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR,
+            #                         hostbuf = mks)
             self.prg.compute_recon_objs_andzsums(self.queue, (N,K,D), None,
                                         d_cur_y, d_cur_z, d_obj_recon, d_z_col_sum,
                                         np.int32(N), np.int32(D), np.int32(K))
 
+            # d_lps = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR,
+            #                         hostbuf = np.require(np.zeros(shape = (N, D), dtype=np.float32),
+            #                                              dtype = np.float32, requirements=['C','A']))
+
+
+            d_lps = cl.Buffer(self.ctx, self.mf.READ_WRITE,size=(N*D*np.dtype('float32').itemsize))
+            # self.prg.init_bufferFlt(self.queue, (N*D,1), None, d_lps, np.int32(N*D), np.float32(0.))
 
             self.prg.calc_lps(self.queue, (N,D), None,
                               d_obj_recon, self.d_obs, d_lps,
                               np.int32(N), np.int32(D),
                               np.float32(self.lam), np.float32(self.epislon))
 
-            lps =  np.require(np.zeros(shape = (N, D), dtype=np.float32),
-                                                         dtype = np.float32, requirements=['C','A'])
-            cl.enqueue_copy(self.queue,lps,d_lps)
+            #lps =  np.require(np.zeros(shape = (N, D), dtype=np.float32),
+            #                  dtype = np.float32, requirements=['C','A'])
+            #cl.enqueue_copy(self.queue,lps,d_lps)
             # call gpu-based function to create the new features...
             maxWorkGroupSize = np.int32(self.device.max_work_group_size/2)
             maxLocalMem = self.device.local_mem_size
@@ -1420,9 +1568,12 @@ class Gibbs(BaseSampler):
             #leftOver = int(math.ceil(curNumToReduce/num_d_workers))
             d_sum_tmp = None
             if curNumToReduce > workGroupSize:
-                d_sum_tmp = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR,
-                                      hostbuf = np.require(np.zeros(shape = (N, D), dtype=np.float32),
-                                                           dtype = np.float32, requirements=['C','A']))
+                # d_sum_tmp = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR,
+                #                       hostbuf = np.require(np.zeros(shape = (N, D), dtype=np.float32),
+                #                                            dtype = np.float32, requirements=['C','A']))
+                d_sum_tmp = cl.Buffer(self.ctx, self.mf.READ_WRITE,size=(N*D*np.dtype('float32').itemsize))
+                self.prg.init_bufferFlt(self.queue, (N*D,1), None, d_sum_tmp, np.int32(N*D), np.float32(0.))
+
                 while curNumToReduce > workGroupSize:
                     leftOver = int(math.ceil(curNumToReduce/num_d_workers))
                     self.prg.sum_reduc1d(self.queue, (num_d_workers,leftOver), (num_d_workers,1),
@@ -1434,13 +1585,10 @@ class Gibbs(BaseSampler):
                         d_sum_tmp = d_lps
                         d_lps = d_old_sum_tmp
 
-
-
             lpX = np.require(np.zeros(shape = (1), dtype=np.float32),
                              dtype = np.float32, requirements=['C','A'])
 
-            d_sum1d = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR,
-                                    hostbuf = lpX)
+            d_sum1d = cl.Buffer(self.ctx, self.mf.READ_WRITE, size = (np.dtype('float32').itemsize))
 
             if (N*D) > workGroupSize:
                 self.prg.finish_sum_reduc1d(self.queue, (workGroupSize,1), (workGroupSize,1),
