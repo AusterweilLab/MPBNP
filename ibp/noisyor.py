@@ -1088,7 +1088,7 @@ class Gibbs(BaseSampler):
             Only one object can get new features per run
         :param cur_y: feature images on host
         :param cur_z: feature ownership on host
-        :return: cur_z, cur_y"""
+        :return: d_cur_z, d_cur_y"""
         a_time = time()
 
         startK = self.k
