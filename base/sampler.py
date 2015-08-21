@@ -5,6 +5,12 @@ from __future__ import print_function
 import numpy as np
 import sys, copy, random, math, csv, gzip, mimetypes, os.path
 from time import time
+import pkgutil
+if pkgutil.find_loader("pandas"):
+    import pandas as pd
+    use_pandas = True
+else:
+    use_pandas = False
 
 def smallest_unused_label(int_labels):
     
@@ -89,28 +95,39 @@ class BaseSampler(object):
         self.no_improv = 0
         self.gpu_time = 0
         self.total_time = 0
-        
+
     def read_csv(self, filepath, header = True):
         """Read data from a csv file.
         """
-        # determine if the type file is gzip
-        filetype, encoding = mimetypes.guess_type(filepath)
-        if encoding == 'gzip':
-            csvfile = gzip.open(filepath, 'r')
+        if use_pandas:
+            filetype, encoding = mimetypes.guess_type(filepath)
+            if encoding == 'gzip':
+                csvfile = pd.read_csv(filepath, compression="gzip", header=None, skiprows=1)
+                self.obs = csvfile.as_matrix()
+                self.N = self.obs.shape[0]
+            else:
+                csvfile = pd.read_csv(filepath, header=None, skiprows=1)
+                self.obs = csvfile.as_matrix()
+                self.N = self.obs.shape[0]
         else:
-            csvfile = open(filepath, 'r')
+            # determine if the type file is gzip
+            filetype, encoding = mimetypes.guess_type(filepath)
+            if encoding == 'gzip':
+                csvfile = gzip.open(filepath, 'r')
+            else:
+                csvfile = open(filepath, 'r')
 
-        #dialect = csv.Sniffer().sniff(csvfile.read(1024))
-        csvfile.seek(0)
-        reader = csv.reader(csvfile)#, dialect)
-        if header:
-            reader.next()
-        for row in reader:
-            self.obs.append([_ for _ in row])
-            
-        self.N = len(self.obs)
+            #dialect = csv.Sniffer().sniff(csvfile.read(1024))
+            csvfile.seek(0)
+            reader = csv.reader(csvfile)#, dialect)
+            if header:
+                reader.next()
+            for row in reader:
+                self.obs.append([_ for _ in row])
+
+            self.N = len(self.obs)
         return
-
+    
     def direct_read_obs(self, obs):
         self.obs = obs
         self.N = len(obs)
@@ -143,7 +160,8 @@ class BaseSampler(object):
         if new_logprob > self.best_sample[1]:
             self.no_improv = 0
             self.best_diff.append(new_logprob - self.best_sample[1])
-            self.best_sample = (copy.deepcopy(self.convert_sample_to_host(sample)), new_logprob)
+            # self.best_sample = (copy.deepcopy(self.convert_sample_to_host(sample)), new_logprob)
+            self.best_sample = (self.convert_sample_to_host(sample), new_logprob)
             print('New best sample found, logprob: {0}'.format(new_logprob), file=sys.stderr)
             return True
         else:
