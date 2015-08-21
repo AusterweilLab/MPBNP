@@ -108,7 +108,7 @@ class Gibbs(BaseSampler):
             #calculate approx. max # of features possible to allocate at once.
             max_mem = self.device.max_mem_alloc_size
             mem_per_feat = self.N * self.d * np.dtype('float32').itemsize
-            self.max_k = max_mem // (mem_per_feat*2)
+            self.max_k = max_mem // (mem_per_feat*4)
             print("max_k:", self.max_k)
 
         #self.alpha = float(self.N) * 5
