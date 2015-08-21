@@ -647,7 +647,7 @@ kernel void calc_z_lps(local float* locmem, global int *cur_y,  global int *cur_
       + (1-my_z_val) * (1-my_y_val) * (1-my_obs_val) * log(pow_val);
     if (dth==0) {
       int mk = z_col_sum[kth];
-      float lpPr = (1.0* mk)/N;
+      float lpPr = (1.0* (mk-my_z_val))/N;
       lp_off[myNKInd] += log(1-lpPr);
       lp_on[myNKInd] += log(lpPr);
     }
@@ -981,8 +981,7 @@ kernel void compute_recon_objs_andzsums(global int*cur_y, global int* cur_z, glo
  }
 
 kernel void calc_lps(global int * obj_recon, global int* obs, global float* lps,
-                    uint N, uint D,
-                    float lambda, float epislon) {
+                    uint N, uint D, float lambda, float epislon) {
 
   uint nth = get_global_id(0);
   uint dth = get_global_id(1);
