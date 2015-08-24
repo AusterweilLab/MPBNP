@@ -29,6 +29,7 @@ MPBNP can be used on Windows 7/8/10, Linux and Mac OSX, with OpenCL support >= 1
 * If you have an nVidia graphics card, the graphics driver contains the OpenCL driver. The graphics driver should have been already installed; otherwise your display wouldn't be fully functional. Go to nvidia's website for latest drivers.
 
   > nVidia's OpenCL driver supports only their graphics cards.
+  > Also note that nVidia's current support for OpenCL is not great. Our development mostly tests on a nVidia Tesla K40 and GeForce GTX 770, and so, normal jobs should work without an issue on these devices. However, running the current OpenCL Gibbs samplers with a large data set on a nVidia device might fail.
 
 * If you have an Intel graphics card that is integrated into an Intel CPU (known as Intel HD Graphics 4xxx and above), and do **NOT** have a discrete graphics card installed, the Intel graphics driver contains the OpenCL driver. The driver should have been already installed; otherwise your display wouldn't be fully functional. Go to Intel's website for latest drivers.
 
