@@ -929,7 +929,7 @@ kernel void logprob_z_data(global int *cur_z,
 
 //TODO: localify
 kernel void compute_recon_objs(global int*cur_y, global int* cur_z, global int* obj_recon,
-                                uint N, uint D, uint K) {
+                                uint N, uint K, uint D) {
 
   uint nth = get_global_id(0);
   uint kth = get_global_id(1);
@@ -939,7 +939,7 @@ kernel void compute_recon_objs(global int*cur_y, global int* cur_z, global int* 
 
   
   int my_val = cur_z[nth*K+kth] * cur_y[kth*D+dth];
-
+  //printf("recon no zsum: recon id: %d\n", recon_idx);
   atomic_add((obj_recon+recon_idx), my_val);
   //  printf("my nth: %d kth %d dth %d, curz: %d, cury %d, my_val %d my recon %d \n", nth, kth, dth, cur_z[nth*K+kth], cur_y[kth*D+dth], my_val, obj_recon[recon_idx]);
  
@@ -954,21 +954,23 @@ kernel void compute_recon_objs(global int*cur_y, global int* cur_z, global int* 
 
 //TODO: localify
 kernel void compute_recon_objs_andzsums(global int*cur_y, global int* cur_z, global int* obj_recon,
-					global int* zsums, uint N, uint D, uint K) {
+					global int* zsums, uint N, uint K, uint D) {
 
   uint nth = get_global_id(0);
   uint kth = get_global_id(1);
   uint dth = get_global_id(2);
 
-  int recon_idx = nth*D + dth;
+  if ((nth < N) && (kth < K) && (dth < D)) {
+    int recon_idx = nth*D + dth;
 
-  int z_val = cur_z[nth*K+kth];
-  int my_val = z_val * cur_y[kth*D+dth];
+    int z_val = cur_z[nth*K+kth];
+    int my_val = z_val * cur_y[kth*D+dth];
+    //printf("nth: %d; kth: %d; dth: %d; my_val: %d; recon id: %d\n", nth,kth,dth,my_val,recon_idx);
+    atomic_add((obj_recon+recon_idx), my_val);
 
-  atomic_add((obj_recon+recon_idx), my_val);
-
-  if (dth == 0) {
-    atomic_add((zsums+kth), z_val); 
+    if (dth == 0) {
+      atomic_add((zsums+kth), z_val);
+    }
   }
   //  printf("my nth: %d kth %d dth %d, curz: %d, cury %d, my_val %d my recon %d \n", nth, kth, dth, cur_z[nth*K+kth], cur_y[kth*D+dth], my_val, obj_recon[recon_idx]);
  
@@ -997,7 +999,7 @@ kernel void calc_lps(global int * obj_recon, global int* obs, global float* lps,
 
 
 kernel void calc_lp_fornew(global int* obj_recon, global int* obs, global float* lps,
-                    uint N, uint D, uint K, uint KNewMax,
+                    uint N, uint K, uint D, uint KNewMax,
                     float lambda, float epislon, float theta) {
 
   int nth = get_global_id(0);

@@ -16,7 +16,7 @@ from scipy.misc import comb
 from pyopencl.clrandom import rand as clrand
 import pyopencl.array as clarray
 #import pandas as pd
-    
+
 np.set_printoptions(suppress=True)
 
 #TODO: optimize buffer creation/when data really needs to be initialized
@@ -25,10 +25,10 @@ np.set_printoptions(suppress=True)
 class Gibbs(BaseSampler):
 
     def __init__(self, cl_mode = True, cl_device = None, record_best = True,
-                 alpha = None, lam = 0.99, theta = 0.25, epislon = 0.01,
-                 sim_annealP = True, init_k = 10, T_init=40., anneal_rate = .99,
-                 splitProb = 0.8, split_mergeP = True, split_steps=20,
-                 splitAdj = 1/150):
+                 alpha = None, lam = 0.999, theta = 0.2, epislon = 0.001,
+                 sim_annealP = True, init_k = 10, T_init=40., anneal_rate = .9999,
+                 splitProb = 0.5, split_mergeP = True, split_steps=20,
+                 splitAdj = 1):
         """Initialize the class.
         """
         BaseSampler.__init__(self, cl_mode = cl_mode, cl_device = cl_device, record_best = record_best)
@@ -56,6 +56,7 @@ class Gibbs(BaseSampler):
         self.samples = {'z': [], 'y': []} # sample storage, to be pickled
         self.sim_annealP = sim_annealP
         self.splitProb = splitProb
+        self.T_init = T_init
         if sim_annealP:
             self.anneal_rate = anneal_rate
             self.T = T_init #current simulated annealing temperature
@@ -67,6 +68,14 @@ class Gibbs(BaseSampler):
         self.splitAdj = splitAdj
         self.float_size = np.array(1,dtype=np.float32).nbytes
         self.int_size = np.array(1,dtype=np.int32).nbytes
+
+
+    def no_improvement(self, threshold=500):
+        no_improvP = BaseSampler.no_improvement(self,threshold)
+        if no_improvP and self.sim_annealP:
+            print("resetting simulated annealing to T_init/2 = ", self.T_init/2)
+            self.T = self.T_init/2
+        return no_improvP
 
     def read_csv(self, filepath, header=True):
         """Read the data from a csv file.
@@ -103,12 +112,14 @@ class Gibbs(BaseSampler):
                 self.d_obs.set(self.obs)
 
         self.d = self.obs.shape[1]
+        print("D: ", self.d)
         self.img_h = int(self.d / self.img_w)
         if self.cl_mode:
             #calculate approx. max # of features possible to allocate at once.
             max_mem = self.device.max_mem_alloc_size
             mem_per_feat = self.N * self.d * np.dtype('float32').itemsize
-            self.max_k = max_mem // (mem_per_feat*4)
+            self.max_k = max_mem // (mem_per_feat*6)
+            #self.max_k = 30
             print("max_k:", self.max_k)
 
         #self.alpha = float(self.N) * 5
@@ -240,9 +251,7 @@ class Gibbs(BaseSampler):
             if self.record_best:
                 if self.auto_save_sample(sample = (temp_cur_y, temp_cur_z)):
                     cur_y, cur_z = temp_cur_y, temp_cur_z
-                if self.no_improvement():
-                    break
-                
+
             elif i >= self.burnin:
                 cur_y, cur_z = temp_cur_y, temp_cur_z
                 self.samples['z'].append(cur_z)
@@ -446,11 +455,12 @@ class Gibbs(BaseSampler):
         D = cur_y.shape[1]
         #d_cur_y = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = cur_y.astype(np.int32))
         #d_cur_z = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR, hostbuf = cur_z.astype(np.int32))
-        d_cur_y = clarray.Array(self.queue, cur_y.shape, dtype=np.int32)
-        d_cur_y.set(cur_y)
-        d_cur_z = clarray.Array(self.queue, cur_z.shape, dtype=np.int32)
-        d_cur_z.set(cur_z)
         self._update_allocs(first_call=True)
+        d_cur_y = clarray.Array(self.queue, cur_y.shape, dtype=np.int32, allocator=self.d_mp)
+        d_cur_y.set(cur_y)
+        d_cur_z = clarray.Array(self.queue, cur_z.shape, dtype=np.int32, allocator=self.d_mp)
+        d_cur_z.set(cur_z)
+
 
         self.auto_save_sample(sample = (d_cur_y, d_cur_z))
 
@@ -465,6 +475,7 @@ class Gibbs(BaseSampler):
                 #split/merge step!
                 #print("trying a split-merge step")
                 d_cur_y, d_cur_z = self._cl_split_merge_anneal_step(d_cur_y, d_cur_z)
+                cl.enqueue_barrier(self.queue)
             else:
                 if debugP:
                     d_cur_y.get(ary=self.tmp_y)
@@ -479,6 +490,7 @@ class Gibbs(BaseSampler):
                     d_cur_y = self._cl_infer_y(d_cur_y, d_cur_z)
                 else:
                     d_cur_y = self._cl_infer_y2(d_cur_y, d_cur_z)
+                cl.enqueue_barrier(self.queue)
                 if debugP:
                     d_cur_y.get(ary=self.tmp_y)
                     d_cur_z.get(ary=self.tmp_z)
@@ -489,7 +501,7 @@ class Gibbs(BaseSampler):
                     print("cur_z")
                     print(self.tmp_z)
                 d_cur_z = self._cl_infer_z(d_cur_y, d_cur_z)
-
+                cl.enqueue_barrier(self.queue)
                 self.gpu_time += time() - a_time
                 #print("tmp_y strides:", self.tmp_y.strides)
                 self.tmp_z = d_cur_z.map_to_host(is_blocking=True)
@@ -505,7 +517,8 @@ class Gibbs(BaseSampler):
                     print("cur_z")
                     print(self.tmp_z)
                 d_cur_y, d_cur_z = self._cl_infer_k_newJLA2(self.tmp_y, self.tmp_z)
- 
+                cl.enqueue_barrier(self.queue)
+
             if self.record_best:
                 # if self.k != cur_z.shape[1]:
                 #     cur_z = np.require(np.zeros(shape = (self.obs.shape[0], self.k), dtype=np.int32),
@@ -514,19 +527,19 @@ class Gibbs(BaseSampler):
                 #                                  dtype = np.int32, requirements=['C','A'])
                 # cl.enqueue_copy(self.queue, cur_z, d_cur_z)
                 # cl.enqueue_copy(self.queue, cur_y, d_cur_y)
-                ignoreVal = None
                 if self.cl_mode:
-                    ignoreVal = self.auto_save_sample(sample=(d_cur_y,d_cur_z))
+                    self.auto_save_sample(sample=(d_cur_y,d_cur_z))
                 else:
-                    ignoreVal = self.auto_save_sample(sample = (cur_y, cur_z))
+                    self.auto_save_sample(sample = (cur_y, cur_z))
+                if self.no_improvement():
+                    cur_y, cur_z = self.best_sample[0]
                 #if self.no_improvement(1000):
                 #    break                    
             elif i >= self.burnin:
                 #cur_y, cur_z = temp_cur_y, temp_cur_z
-                cl.enqueue_copy(self.queue, cur_z, d_cur_z)
-                cl.enqueue_copy(self.queue, cur_y, d_cur_y)
-                self.samples['z'].append(cur_z)
-                self.samples['y'].append(cur_y)
+
+                self.samples['z'].append(d_cur_z.get())
+                self.samples['y'].append(d_cur_y.get())
             
             self.total_time += time() - a_time
 
@@ -547,11 +560,11 @@ class Gibbs(BaseSampler):
             d_obj_recon = self.d_obj_recon.fill(0)
             self.prg.compute_recon_objs(self.queue, (N, K, D), None,
                                     d_cur_y.data, d_cur_z.data, d_obj_recon.data,
-                                    np.int32(N), np.int32(D), np.int32(K))
+                                    np.int32(N), np.int32(K), np.int32(D))
 
             rand_vals = np.require(np.random.random(size = (K, D)),
                                    dtype=np.float32, requirements=['C','A'])
-            d_rand = clarray.Array(self.queue,shape=(K,D),dtype=np.float32)
+            d_rand = clarray.Array(self.queue,shape=(K,D),dtype=np.float32,allocator=self.d_mp)
             d_rand.set(rand_vals)
             #d_rand = clrand(self.queue,(K,D), dtype=np.float32)
 
@@ -618,12 +631,13 @@ class Gibbs(BaseSampler):
             d_obj_recon = self.d_obj_recon.fill(0)
             self.prg.compute_recon_objs(self.queue, (N, K, D), None,
                                     d_cur_y.data, d_cur_z.data, d_obj_recon.data,
-                                    np.int32(N), np.int32(D), np.int32(K))
+                                    np.int32(N), np.int32(K), np.int32(D))
 
             #d_rand = clrand(self.queue,(K,D), dtype=np.float32)
             rand_vals = np.require(np.random.random(size=(K, D)),
                                    dtype=np.float32, requirements=['C','A'])
-            d_rand = clarray.Array(self.queue,shape=(K,D),dtype=np.float32)
+            d_rand = clarray.Array(self.queue,shape=(K,D),dtype=np.float32,allocator=self.d_mp)
+            #self.queue.finish()
             d_rand.set(rand_vals)
 
             d_lp_off = self.d_lp_y_off.fill(value=0.)
@@ -671,13 +685,15 @@ class Gibbs(BaseSampler):
         K = self.k
 
         if K > 0:
-
+           #
             #d_obj_recon = clarray.zeros(self.queue,shape=(N,D),dtype=np.int32)
-            d_obj_recon = self.d_obj_recon.fill(value=0)
-            d_z_col_sum = clarray.zeros(self.queue,shape=(K,1),dtype=np.int32)
+            d_obj_recon = self.d_obj_recon
+            d_obj_recon.fill(0)
+            self.queue.finish()
+            d_z_col_sum = clarray.zeros(self.queue,shape=(K,1),dtype=np.int32, allocator=self.d_mp)
             self.prg.compute_recon_objs_andzsums(self.queue, (N, K, D), None,
                                                  d_cur_y.data, d_cur_z.data, d_obj_recon.data, d_z_col_sum.data,
-                                                 np.int32(N), np.int32(D), np.int32(K))
+                                                 np.int32(N), np.int32(K), np.int32(D))
 
 
             #d_lp_off = clarray.zeros(self.queue,shape=(N,K,D), dtype=np.float32)
@@ -721,7 +737,7 @@ class Gibbs(BaseSampler):
 
             num_loop = int(math.ceil(D/workGroupSize))
 
-            #probably could be made more efficient:
+            #probably could be made more efficient (convert to using memory pool)
             d_lp_off_tmp = d_lp_off.copy()
             d_lp_on_tmp = d_lp_on.copy()
 
@@ -777,7 +793,10 @@ class Gibbs(BaseSampler):
             #d_rand = clrand(self.queue,(N,K), dtype=np.float32)
             rand_vals = np.require(np.random.random(size = (N,K)),
                                    dtype=np.float32, requirements=['C','A'])
-            d_rand = clarray.Array(self.queue,shape=(N,K),dtype=np.float32)
+            d_rand = clarray.Array(self.queue,shape=(N,K),dtype=np.float32, allocator=self.d_mp)
+            #added b/c sometimes we err otherwise with out of resources
+            #print("properties: %d and ref count: %d" % (self.queue.properties, self.queue.reference_count))
+            self.queue.finish()
             d_rand.set(rand_vals)
             #now d=0 of lp_off and lp_on for all nk has the answer
             self.prg.sample_z_pre_calc(self.queue, (N, K), None, d_cur_z.data, d_lp_off.data, d_lp_on.data,
@@ -878,7 +897,7 @@ class Gibbs(BaseSampler):
             
             self.prg.compute_recon_objs(self.queue, (N, K, D), None,
                                     d_cur_y, d_cur_z, d_obj_recon,
-                                    np.int32(N), np.int32(D), np.int32(K))
+                                    np.int32(N), np.int32(K), np.int32(D))
        
         
             # obj_recon = np.require(np.zeros(shape = self.obs.shape, dtype=np.int32),
@@ -1112,20 +1131,23 @@ class Gibbs(BaseSampler):
 
         # update self.k
         self.k = cur_z.shape[1]
+        N = self.obs.shape[0]
+        K = cur_z.shape[1]
+        D = self.obs.shape[1]
+
         updated_p = False
-
+        d_cur_z = None
+        d_cur_y = None
         if self.k <= (self.max_k - self.k_max_new):
-            N = self.obs.shape[0]
-            K = cur_z.shape[1]
-            D = self.obs.shape[1]
 
-            obj_recon = None
+            # obj_recon = None
 
-            self.d_obj_recon=clarray.zeros(self.queue,shape=(N,D),dtype=np.int32)
+            #self.d_obj_recon=clarray.zeros(self.queue,shape=(N,D),dtype=np.int32, allocator=self.d_mp)
             d_obj_recon = self.d_obj_recon
-            if cur_z.size is 0:
-                obj_recon = np.zeros(self.obs.shape)
-            else:
+            d_obj_recon.fill(0)
+            # if cur_z.size is 0:
+            #     obj_recon = np.zeros(self.obs.shape)
+            if cur_z.size > 0:
                 d_cur_z = clarray.Array(self.queue,shape=(N,K),dtype=np.int32)
                 d_cur_z.set(ary=cur_z)
                 d_cur_y = clarray.Array(self.queue,shape=(K,D),dtype=np.int32)
@@ -1133,7 +1155,7 @@ class Gibbs(BaseSampler):
 
                 self.prg.compute_recon_objs(self.queue, (N, K, D), None,
                                         d_cur_y.data, d_cur_z.data, d_obj_recon.data,
-                                        np.int32(N), np.int32(D), np.int32(K))
+                                        np.int32(N), np.int32(K), np.int32(D))
 
 
             # lps = np.require(np.empty((N,D,self.k_max_new+1), dtype=np.float32),
@@ -1147,7 +1169,7 @@ class Gibbs(BaseSampler):
             #TODO: localify k_max_new to share some values
             self.prg.calc_lp_fornew(self.queue, (N, D, self.k_max_new+1), None,
                                     d_obj_recon.data, self.d_obs.data, d_lps.data,
-                                    np.int32(N), np.int32(D), np.int32(K), np.int32(self.k_max_new+1),
+                                    np.int32(N), np.int32(K), np.int32(D), np.int32(self.k_max_new+1),
                                     np.float32(self.lam), np.float32(self.epislon), np.float32(self.theta))
 
             # cl.enqueue_copy(self.queue, lps, d_lps)
@@ -1183,9 +1205,9 @@ class Gibbs(BaseSampler):
 
                 self.k = K
 
-                d_cur_z= clarray.Array(self.queue, shape = cur_z.shape, dtype=np.int32)
+                d_cur_z= clarray.Array(self.queue, shape = cur_z.shape, dtype=np.int32, allocator=self.d_mp)
                 d_cur_z.set(ary=cur_z)
-                d_cur_y= clarray.Array(self.queue, shape = cur_y.shape, dtype=np.int32)
+                d_cur_y= clarray.Array(self.queue, shape = cur_y.shape, dtype=np.int32, allocator=self.d_mp)
                 d_cur_y.set(ary=cur_y)
                 # d_new_z.set(ary=new_z)
                 # d_cur_z = clarray.concatenate((d_cur_z, d_new_z), axis=1)
@@ -1204,7 +1226,8 @@ class Gibbs(BaseSampler):
                 self.tmp_y = cur_y
                 comb_vec = np.require(comb(new_k, np.arange(new_k+1)),
                                       dtype=np.int32, requirements=['C','A'])
-                d_comb_vec = clarray.Array(self.queue,shape=(new_k+1,1),dtype=np.int32,strides=comb_vec.strides)
+                d_comb_vec = clarray.Array(self.queue,shape=(new_k+1,1),dtype=np.int32,
+                                           strides=comb_vec.strides, allocator=self.d_mp)
                 d_comb_vec.set(ary=comb_vec)
                 # d_comb_vec = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR,
                 #                        hostbuf=comb_vec.astype(np.int32))
@@ -1240,7 +1263,8 @@ class Gibbs(BaseSampler):
                 # d_y_rand_vals = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR,
                 #                           hostbuf=y_rand_vals.astype(np.float32))
 
-                d_y_rand_vals = clarray.Array(self.queue,shape=y_rand_vals.shape,dtype=np.float32)
+                d_y_rand_vals = clarray.Array(self.queue,shape=y_rand_vals.shape,dtype=np.float32,
+                                              allocator=self.d_mp)
                 d_y_rand_vals.set(y_rand_vals)
                 #d_y_rand_vals = clrand(self.queue,(D,1), dtype=np.float32)
                 tmpLocMemNPFlt = np.empty(workGroupSize,dtype=np.float32)
@@ -1269,11 +1293,11 @@ class Gibbs(BaseSampler):
                 d_cur_z = self._cl_infer_z(d_cur_y, d_cur_z)
         else:
             print("warning: reached upper limit %d on features for device. cannot create new" % self.max_k)
-        
-            # # Delete empty feature images
-            # non_empty_feat_img = np.where(cur_y.sum(axis = 1) > 0)
-            # cur_y = cur_y[non_empty_feat_img[0],:].astype(np.int32)
-            # cur_z = cur_z[:,non_empty_feat_img[0]].astype(np.int32)
+            d_cur_z = clarray.Array(self.queue,shape=(N,K),dtype=np.int32, allocator=self.d_mp)
+            d_cur_z.set(ary=cur_z)
+            d_cur_y = clarray.Array(self.queue,shape=(K,D),dtype=np.int32, allocator=self.d_mp)
+            d_cur_y.set(ary=cur_y)
+
         #TODO: make so all reallocation steps happen here!
         if self.k is not startK and updated_p is False:
             self._update_allocs()
@@ -1287,15 +1311,17 @@ class Gibbs(BaseSampler):
         K = self.k
         D = self.d
         if first_call is True:
-            self.d_obj_recon = clarray.zeros(self.queue,shape=(N,D),dtype=np.int32)
+            self.d_mp =  cl.tools.MemoryPool(cl.tools.ImmediateAllocator(self.queue))
+            self.d_obj_recon = clarray.zeros(self.queue,shape=(N,D),dtype=np.int32, allocator=self.d_mp)
             # print('pre')
             # print(clarray.sum(self.d_obj_recon))
-            self.d_recon_lps = clarray.Array(self.queue,shape=(N,D),dtype=np.float32)
+            self.d_recon_lps = clarray.Array(self.queue,shape=(N,D),dtype=np.float32, allocator=self.d_mp)
+
         if accepted_sm is False or reset_after_sm is True:
-            self.d_lp_y_off = clarray.zeros(self.queue,shape=(K,D),dtype=np.float32)
-            self.d_lp_y_on = clarray.zeros(self.queue,shape=(K,D),dtype=np.float32)
-            self.d_lp_z_off = clarray.zeros(self.queue,shape=(N,K,D), dtype=np.float32)
-            self.d_lp_z_on = clarray.zeros(self.queue,shape=(N,K,D), dtype=np.float32)
+            self.d_lp_y_off = clarray.zeros(self.queue,shape=(K,D),dtype=np.float32, allocator=self.d_mp)
+            self.d_lp_y_on = clarray.zeros(self.queue,shape=(K,D),dtype=np.float32, allocator=self.d_mp)
+            self.d_lp_z_off = clarray.zeros(self.queue,shape=(N,K,D), dtype=np.float32, allocator=self.d_mp)
+            self.d_lp_z_on = clarray.zeros(self.queue,shape=(N,K,D), dtype=np.float32, allocator=self.d_mp)
 
         if reset_after_sm is False and (accepted_sm is True or for_split_merge is False):
             self.tmp_z = np.require(np.zeros(shape=(self.N,self.k), dtype=np.int32),
@@ -1303,7 +1329,8 @@ class Gibbs(BaseSampler):
             self.tmp_y = np.require(np.zeros(shape=(self.k,self.d), dtype=np.int32),
                                                      dtype=np.int32, requirements=['C','A'])
 
-            self.d_knew_lp = clarray.Array(self.queue,shape=(N,D,self.k_max_new+1),dtype=np.float32)
+            self.d_knew_lp = clarray.Array(self.queue,shape=(N,D,self.k_max_new+1),dtype=np.float32,
+                                           allocator=self.d_mp)
 
     def _cl_split_merge_anneal_step(self, d_cur_y, d_cur_z):
         # if not self.sim_annealP:
@@ -1340,11 +1367,11 @@ class Gibbs(BaseSampler):
                 z_samp[n2,K] = 1
                 z_samp[n2,k_ind] = 0
                 z_samp[pick2[2:],k_ind] = 0
-                d_samp_z = clarray.Array(self.queue,shape=z_samp.shape,dtype=np.int32)
+                d_samp_z = clarray.Array(self.queue,shape=z_samp.shape,dtype=np.int32,allocator=self.d_mp)
                 d_samp_z.set(ary=z_samp)
-                d_y_zeros = clarray.zeros(self.queue,shape=(1,D),dtype=np.int32)
+                d_y_zeros = clarray.zeros(self.queue,shape=(1,D),dtype=np.int32, allocator=self.d_mp)
                 d_samp_y = d_cur_y.copy()
-                d_samp_y=clarray.concatenate((d_samp_y,d_y_zeros),axis=0)
+                d_samp_y=clarray.concatenate((d_samp_y,d_y_zeros),axis=0,allocator=self.d_mp)
 
                 #
                 # d_samp_z = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR,
@@ -1401,9 +1428,11 @@ class Gibbs(BaseSampler):
                 z_samp = z_samp[:,z_mask]
                 y_samp = y_samp[z_mask,:]
                 self.k = K-1
-                d_samp_z = clarray.Array(self.queue,shape=z_samp.shape,dtype=np.int32,strides=z_samp.strides)
+                d_samp_z = clarray.Array(self.queue,shape=z_samp.shape,dtype=np.int32,
+                                         strides=z_samp.strides,allocator=self.d_mp)
                 d_samp_z.set(ary=z_samp)
-                d_samp_y = clarray.Array(self.queue,shape=y_samp.shape,dtype=np.int32,strides=y_samp.strides)
+                d_samp_y = clarray.Array(self.queue,shape=y_samp.shape,dtype=np.int32,
+                                         strides=y_samp.strides,allocator=self.d_mp)
                 d_samp_y.set(ary=y_samp)
                 # d_samp_y = cl.Buffer(self.ctx, self.mf.READ_WRITE | self.mf.COPY_HOST_PTR,
                 #                           hostbuf = y_samp.astype(np.int32))
@@ -1475,16 +1504,19 @@ class Gibbs(BaseSampler):
             D = self.obs.shape[1]
             K = self.k
 
-            d_z_col_sum = clarray.zeros(self.queue,(K,1),dtype=np.int32)
+            d_z_col_sum = clarray.zeros(self.queue,(K,1),dtype=np.int32, allocator=self.d_mp)
 
             d_obj_recon = self.d_obj_recon
             d_obj_recon.fill(0)
+            self.queue.finish()
+            #while d_z_col_sum is None:
+            #    print("waiting for z_col to return...")
 
             #d_obj_recon = clarray.zeros(self.queue,shape=(N,D),dtype=np.int32)
 
             self.prg.compute_recon_objs_andzsums(self.queue, (N,K,D), None,
                                         d_cur_y.data, d_cur_z.data, d_obj_recon.data, d_z_col_sum.data,
-                                        np.int32(N), np.int32(D), np.int32(K))
+                                        np.int32(N), np.int32(K), np.int32(D))
 
             #d_lps = clarray.Array(self.queue,shape=(N,D),dtype=np.float32)
 
@@ -1496,8 +1528,9 @@ class Gibbs(BaseSampler):
                               np.int32(N), np.int32(D), np.float32(self.lam), np.float32(self.epislon))
 
 
-            lpX = clarray.sum(d_lps).get()
-
+            lpX = clarray.sum(d_lps)
+            self.queue.finish()
+            lpX = lpX.get()
             mks = d_z_col_sum.get()
 
             cur_z = d_cur_z.map_to_host(is_blocking=True)
@@ -1509,7 +1542,6 @@ class Gibbs(BaseSampler):
             #_,cts = np.unique(cur_z.view(np.dtype((np.void, cur_z.dtype.itemsize *cur_z.shape[0]))), return_counts=True)
             mk_mask = np.where(mks > 0)
             lpZ = np.sum(gammaln(mks[mk_mask])+gammaln(N-mks[mk_mask]+1)-gammaln(N+1)) -np.sum(gammaln(cts))
-            #TODO: INCLUDE EQUAL FEATURE ASSIGNMENT PENALTY
             #lpZ = np.sum(gammaln(mks[mk_mask])+gammaln(N-mks[mk_mask]+1)-gammaln(N+1))
             return lpZ + lpX
 

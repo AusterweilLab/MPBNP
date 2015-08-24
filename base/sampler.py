@@ -169,9 +169,11 @@ class BaseSampler(object):
             return False
 
     def no_improvement(self, threshold=500):
-        if len(self.best_diff) == 0: return False
-        if self.no_improv > threshold or np.mean(self.best_diff[-threshold:]) < 1:
-            print('Too little improvement in log probability - Abort searching', file=sys.stderr)
+        #if len(self.best_diff) == 0: return False
+        #if self.no_improv > threshold or np.mean(self.best_diff[-threshold:]) < 1:
+        if self.no_improv > threshold:
+            print('No improvement in log probability for %d steps' % threshold, file=sys.stderr)
+            self.no_improv=0
             return True
         return False
         
