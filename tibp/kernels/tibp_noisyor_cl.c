@@ -351,7 +351,7 @@ kernel void calc_zr_lps(global int* cur_y, global int * cur_z,global int *cur_r,
                           global float* lp_nkr_on, global float* lp_nk_off,
                           global int * obs,
                           uint N, uint K, uint D, uint f_img_width,
-                          float lambda, float epislon, float theta) {
+                          float lambda, float epsilon, float theta) {
 
   const uint V_TRANS = 0, H_TRANS = 1, NUM_TRANS = 2;
   uint nth = get_global_id(0);
@@ -391,9 +391,9 @@ kernel void calc_zr_lps(global int* cur_y, global int * cur_z,global int *cur_r,
     int y_idx = kth*D+((t_index+d)%D);
     int my_y_val = cur_y[y_idx];
 
-    float pow_val = (1-epislon)*native_powr(1-lambda, cur_pred);
-    float pow_val_less1 = (1-epislon)*native_powr(1-lambda, max(cur_pred-1,0));
-    float pow_val_plus1 = (1-epislon)*native_powr(1-lambda, cur_pred+1);
+    float pow_val = (1-epsilon)*native_powr(1-lambda, cur_pred);
+    float pow_val_less1 = (1-epsilon)*native_powr(1-lambda, max(cur_pred-1,0));
+    float pow_val_plus1 = (1-epsilon)*native_powr(1-lambda, cur_pred+1);
 
     // calculate prob w/o feat k and w/ it (at the current transformation given by rth over all pixels d)
     lP_z_off += (1-my_z_val) * my_obs_val* log(1-pow_val)
@@ -434,7 +434,7 @@ kernel void sample_rz_noscOvRP2(global int* cur_y, global int* cur_z, global int
                           global float* lp_rsums, global int* z_col_sum, global int * obs,
                           global float* randForZ, global float* randForR,
                           uint N, uint D, uint K, uint f_img_width,
-                          float lambda, float epislon, float theta) {
+                          float lambda, float epsilon, float theta) {
 
   const uint V_SCALE = 0, H_SCALE = 1, V_TRANS = 2, H_TRANS = 3, NUM_TRANS = 4;
   uint nth = get_global_id(0);
@@ -493,7 +493,7 @@ kernel void rz_do_log_trick(global float* lp_nkr_on, global float * lp_nk_rmax,
 }
 
 kernel void calc_lps(global int * obj_recon, global int* obs, global float* lps,
-                    uint N, uint D, float lambda, float epislon) {
+                    uint N, uint D, float lambda, float epsilon) {
 
   uint nth = get_global_id(0);
   uint dth = get_global_id(1);
@@ -503,14 +503,14 @@ kernel void calc_lps(global int * obj_recon, global int* obs, global float* lps,
   int my_recon = obj_recon[my_obs_ind];
   int my_obs = obs[my_obs_ind];
 
-  float pow_val = native_powr(1-lambda,my_recon) * (1-epislon);
+  float pow_val = native_powr(1-lambda,my_recon) * (1-epsilon);
   lps[my_obs_ind] = my_obs * log(1-pow_val) + (1-my_obs) * log(pow_val);
 }
 
 
 kernel void calc_lp_fornew(global int* obj_recon, global int* obs, global float* lps,
                     uint N, uint K, uint D, uint KNewMax,
-                    float lambda, float epislon, float theta) {
+                    float lambda, float epsilon, float theta) {
 
   int nth = get_global_id(0);
   int dth = get_global_id(1);
@@ -522,7 +522,7 @@ kernel void calc_lp_fornew(global int* obj_recon, global int* obs, global float*
 
   int mylp_ind = nth*D*KNewMax+dth*KNewMax + k_newth;
 
-  float pow_val = (1-epislon) * native_powr(1-lambda, my_pred) * native_powr(1-lambda*theta, k_newth);
+  float pow_val = (1-epsilon) * native_powr(1-lambda, my_pred) * native_powr(1-lambda*theta, k_newth);
   lps[mylp_ind] = my_obs_val * log(1-pow_val) + (1-my_obs_val) * log(pow_val);
 }
 
@@ -530,7 +530,7 @@ kernel void calc_lp_fornew(global int* obj_recon, global int* obs, global float*
 kernel void calc_y_lps_old(local float* locmem, global int* cur_y, global int *cur_z, global int* cur_recon,
 		       global int* obs, global float* lp_off, global float* lp_on,
 		       uint N, uint D, uint K, uint numPrevRun,
-		       float lambda, float epislon, float theta) {
+		       float lambda, float epsilon, float theta) {
   int nth = get_global_id(0) + numPrevRun;
   int numRun = get_global_size(0);
   int kth = get_global_id(1);
@@ -556,9 +556,9 @@ kernel void calc_y_lps_old(local float* locmem, global int* cur_y, global int *c
 
   int my_y_val =cur_y[my_y_ind];
   //int my_y_val = cur_y[my_y_ind];
-  float pow_val = native_powr(1-lambda, my_recon) * (1-epislon);
-  float pow_val_less1 = native_powr(1-lambda, max(my_recon-1,0)) * (1-epislon);
-  float pow_val_plus1 = native_powr(1-lambda, my_recon+1) * (1-epislon);
+  float pow_val = native_powr(1-lambda, my_recon) * (1-epsilon);
+  float pow_val_less1 = native_powr(1-lambda, max(my_recon-1,0)) * (1-epsilon);
+  float pow_val_plus1 = native_powr(1-lambda, my_recon+1) * (1-epsilon);
 
   // lpOff
   locmem[lid] = my_z_val * my_y_val * my_obs_val * log(1-pow_val_less1)
@@ -604,7 +604,7 @@ kernel void calc_y_lps_old(local float* locmem, global int* cur_y, global int *c
 kernel void calc_y_lp_off(local float* locmem, global int* cur_y, global int *cur_z, global int* cur_recon,
 		       global int* obs, global float* lp_off,
 		       uint N, uint D, uint K, uint numPrevRun,
-		       float lambda, float epislon, float theta) {
+		       float lambda, float epsilon, float theta) {
   int nth = get_global_id(0) + numPrevRun;
   int numRun = get_global_size(0);
   int kth = get_global_id(1);
@@ -624,9 +624,9 @@ kernel void calc_y_lp_off(local float* locmem, global int* cur_y, global int *cu
 
   int my_y_val =cur_y[my_y_ind];
 
-  float pow_val = native_powr(1-lambda, my_recon) * (1-epislon);
-  float pow_val_less1 = native_powr(1-lambda, max(my_recon-1,0)) * (1-epislon);
-  float pow_val_plus1 = native_powr(1-lambda, my_recon+1) * (1-epislon);
+  float pow_val = native_powr(1-lambda, my_recon) * (1-epsilon);
+  float pow_val_less1 = native_powr(1-lambda, max(my_recon-1,0)) * (1-epsilon);
+  float pow_val_plus1 = native_powr(1-lambda, my_recon+1) * (1-epsilon);
 
   // lpOff
   locmem[lid] = my_z_val * my_y_val * my_obs_val * log(1-pow_val_less1)
@@ -663,7 +663,7 @@ kernel void calc_y_lp_off(local float* locmem, global int* cur_y, global int *cu
 kernel void calc_y_lp_on(local float* locmem, global int* cur_y, global int *cur_z, global int* cur_recon,
 		       global int* obs, global float* lp_on,
 		       uint N, uint D, uint K, uint numPrevRun,
-		       float lambda, float epislon, float theta) {
+		       float lambda, float epsilon, float theta) {
   int nth = get_global_id(0) + numPrevRun;
 
   int numRun = get_global_size(0);
@@ -680,9 +680,9 @@ kernel void calc_y_lp_on(local float* locmem, global int* cur_y, global int *cur
 
   int my_y_val =cur_y[my_y_ind];
 
-  float pow_val = native_powr(1-lambda, my_recon) * (1-epislon);
-  float pow_val_less1 = native_powr(1-lambda, max(my_recon-1,0)) * (1-epislon);
-  float pow_val_plus1 = native_powr(1-lambda, my_recon+1) * (1-epislon);
+  float pow_val = native_powr(1-lambda, my_recon) * (1-epsilon);
+  float pow_val_less1 = native_powr(1-lambda, max(my_recon-1,0)) * (1-epsilon);
+  float pow_val_plus1 = native_powr(1-lambda, my_recon+1) * (1-epsilon);
 
   locmem[lid] = my_z_val * my_y_val * my_obs_val * log(1-pow_val)
     + my_z_val * my_y_val * (1-my_obs_val) * log(pow_val)
@@ -721,7 +721,7 @@ kernel void calc_y_lp_on(local float* locmem, global int* cur_y, global int *cur
 kernel void calc_y_probs(local int* ourPixs, global float* nkd_yprob_on, global float* nkd_yprob_off,
 			 global int* obj_recon, global int* objs, global int* cur_z, global int* cur_y, global int* cur_r,
 			 uint N, uint K, uint D, uint startInd, uint f_img_width,
-			 float lambda, float epislon, float theta) {
+			 float lambda, float epsilon, float theta) {
   const uint V_SCALE = 0, H_SCALE = 1, V_TRANS = 2, H_TRANS = 3, NUM_TRANS = 4;
 
   int group_size = get_local_size(0);
@@ -757,9 +757,9 @@ kernel void calc_y_probs(local int* ourPixs, global float* nkd_yprob_on, global 
     float myOffVal = log(1-theta);
 
     //TODO: process these durign local step and store as int/ retreive as float via casting
-    float pow_val = (1-epislon)* native_powr(1-lambda, cur_pred);
-    float pow_val_less1 = (1-epislon) *native_powr(1-lambda, max(cur_pred-1,0));
-    float pow_val_plus1 = (1-epislon) *native_powr(1-lambda, cur_pred+1);
+    float pow_val = (1-epsilon)* native_powr(1-lambda, cur_pred);
+    float pow_val_less1 = (1-epsilon) *native_powr(1-lambda, max(cur_pred-1,0));
+    float pow_val_plus1 = (1-epsilon) *native_powr(1-lambda, cur_pred+1);
 
     myOffVal += my_z_val*my_obs_val*my_y_val*log(1-pow_val_less1)
               + my_z_val*my_obs_val*(1-my_y_val)*log(1-pow_val)
@@ -783,7 +783,7 @@ kernel void new_y_val_probs2(local int* locmem, global float* cur_z, global floa
 			     global int* comb_vec, global int* obj_recon,
 			     global int* obs, global float *new_probs,
 			     uint nth, uint new_k, uint N, uint D, uint K,
-			     float lambda, float epislon, float theta) {
+			     float lambda, float epsilon, float theta) {
   const int NEW_K_START = 0;
   //int dBase = get_global_id(0);
   int lid0 = get_local_id(0); // where in cur dim window
@@ -807,7 +807,7 @@ kernel void new_y_val_probs2(local int* locmem, global float* cur_z, global floa
     int my_recon_val = obj_recon[my_obs_idx];
     int my_knew_choose_val = locmem[NEW_K_START + newKth];
 
-    float lik_pow_val = native_powr(1-lambda,my_recon_val+newKth) * (1-epislon);
+    float lik_pow_val = native_powr(1-lambda,my_recon_val+newKth) * (1-epsilon);
     float pr_pow_val = my_knew_choose_val * native_powr(theta, newKth) * native_powr(1-theta, new_k-newKth);
 
     int my_probs_ind = newKth*D + dth;
@@ -919,7 +919,7 @@ kernel void new_y_val_probs(local int* locmem, global float* cur_z, global float
                               global float* comb_vec, global float* obj_recon,
                               global float* obs, global float * new_probs,
                               uint N, uint K, uint D, uint newK,
-                              float lambda, float epislon, float theta) {
+                              float lambda, float epsilon, float theta) {
   const int MY_OBS = 0, MY_RECON = 1, NEW_K_START = 2;
   int dth = get_global_id(0);
   int nth = get_global_id(1);
@@ -941,7 +941,7 @@ kernel void new_y_val_probs(local int* locmem, global float* cur_z, global float
   int my_obs_val = locmem[MY_OBS];
   int my_recon_val = locmem[MY_RECON];
   int my_knew_choose_val = locmem[NEW_K_START + newKth];
-  float lik_pow_val = native_powr(1-lambda,my_recon_val+newKth) * (1-epislon);
+  float lik_pow_val = native_powr(1-lambda,my_recon_val+newKth) * (1-epsilon);
   float pr_pow_val = my_knew_choose_val * native_powr(theta, newKth) * native_powr(1-theta, newK-newKth);
 
   new_probs[newKth*D+dth] = my_obs_val * (1-lik_pow_val) * pr_pow_val +
@@ -1132,7 +1132,7 @@ kernel void sample_rz_noscOvRP4b(global int* cur_y, global int* cur_z, global in
                           global float* lp_rsums, global int* z_col_sum, global int * obs,
                           global float* randForZ, global float* randForR,
                           uint N, uint D, uint K, uint f_img_width,
-                          float lambda, float epislon, float theta) {
+                          float lambda, float epsilon, float theta) {
 
   const uint V_SCALE = 0, H_SCALE = 1, V_TRANS = 2, H_TRANS = 3, NUM_TRANS = 4;
   uint nth = get_global_id(0);
@@ -1193,7 +1193,7 @@ kernel void sample_rz_noscOvRP5(global int* cur_y, global int* cur_z, global int
                           global float* lp_rsums, global int* z_col_sum, global int * obs,
                           global float* randForZ, global float* randForR,
                           uint N, uint D, uint K, uint f_img_width,
-                          float lambda, float epislon, float theta) {
+                          float lambda, float epsilon, float theta) {
 
   const uint V_SCALE = 0, H_SCALE = 1, V_TRANS = 2, H_TRANS = 3, NUM_TRANS = 4;
   uint nth = get_global_id(0);
@@ -1480,7 +1480,7 @@ kernel void sample_y(global int *cur_y,
 		     global int *obs,
 		     global float *rand, 
 		     uint N, uint D, uint K, uint f_img_width,
-		     float lambda, float epislon, float theta) {
+		     float lambda, float epsilon, float theta) {
   
   const uint V_SCALE = 0, H_SCALE = 1, V_TRANS = 2, H_TRANS = 3, NUM_TRANS = 4;
 
@@ -1521,11 +1521,11 @@ kernel void sample_y(global int *cur_y,
 	    if (obs[n * D + new_index] == 1) { // transformed feature affects the pixel at new_index not dth, cf., ibp
 	      // if the feature image previously has this pixel on
 	      if (cur_y[kth * D + dth] == 1) { // this is dth instead of new_index because we are referring to the original y
-		on_loglik_temp += log(1 - pow(1 - lambda, z_by_ry[n * D + new_index]) * (1 - epislon));
-		off_loglik_temp += log(1 - pow(1 - lambda, z_by_ry[n * D + new_index] - 1) * (1 - epislon));
+		on_loglik_temp += log(1 - pow(1 - lambda, z_by_ry[n * D + new_index]) * (1 - epsilon));
+		off_loglik_temp += log(1 - pow(1 - lambda, z_by_ry[n * D + new_index] - 1) * (1 - epsilon));
 	      } else {
-		on_loglik_temp += log(1 - pow(1 - lambda, z_by_ry[n * D + new_index] + 1) * (1 - epislon));
-		off_loglik_temp += log(1 - pow(1 - lambda, z_by_ry[n * D + new_index]) * (1 - epislon));
+		on_loglik_temp += log(1 - pow(1 - lambda, z_by_ry[n * D + new_index] + 1) * (1 - epsilon));
+		off_loglik_temp += log(1 - pow(1 - lambda, z_by_ry[n * D + new_index]) * (1 - epsilon));
 	      }
 	    } else { // else obs[n * D + new_index] == 0
 	      on_loglik_temp += log(1 - lambda);
@@ -1551,7 +1551,7 @@ kernel void sample_y_nosc(global int *cur_y,
 		     global int *obs,
 		     global float *rand,
 		     uint N, uint D, uint K, uint f_img_width,
-		     float lambda, float epislon, float theta) {
+		     float lambda, float epsilon, float theta) {
 
   const uint V_SCALE = 0, H_SCALE = 1, V_TRANS = 2, H_TRANS = 3, NUM_TRANS = 4;
 
@@ -1587,7 +1587,7 @@ kernel void sample_y_nosc(global int *cur_y,
       new_index = (v_dist) % f_img_height * f_img_width + (h_dist) % f_img_width;
       int cur_obs = obs[n*D + new_index];
       int cur_z_val = z_by_ry[n*D+new_index];
-      float cur_pow = pow(1-lambda, cur_z_val) * (1-epislon);
+      float cur_pow = pow(1-lambda, cur_z_val) * (1-epsilon);
       float cur_pow_less1 = cur_pow/(1-lambda);
       float cur_pow_plus1 = cur_pow * (1-lambda);
 
@@ -1613,7 +1613,7 @@ kernel void sample_z(global int *cur_y,
 		     global int *obs,
 		     global float *rand, 
 		     uint N, uint D, uint K, uint f_img_width,
-		     float lambda, float epislon, float theta) {
+		     float lambda, float epsilon, float theta) {
   
   const uint V_SCALE = 0, H_SCALE = 1, V_TRANS = 2, H_TRANS = 3, NUM_TRANS = 4;
   uint h, w, new_index; // variables used in the for loop
@@ -1654,11 +1654,11 @@ kernel void sample_z(global int *cur_y,
 	    if (obs[nth * D + new_index] == 1) {
 	      // if the nth object previously has the kth feature
 	      if (cur_z[nth * K + kth] == 1) {
-		on_prob_temp *= 1 - pow(1 - lambda, z_by_ry[nth * D + new_index]) * (1 - epislon);
-		off_prob_temp *= 1 - pow(1 - lambda, z_by_ry[nth * D + new_index] - 1) * (1 - epislon);
+		on_prob_temp *= 1 - pow(1 - lambda, z_by_ry[nth * D + new_index]) * (1 - epsilon);
+		off_prob_temp *= 1 - pow(1 - lambda, z_by_ry[nth * D + new_index] - 1) * (1 - epsilon);
 	      } else {
-		on_prob_temp *= 1 - pow(1 - lambda, z_by_ry[nth * D + new_index] + 1) * (1 - epislon);
-		off_prob_temp *= 1 - pow(1 - lambda, z_by_ry[nth * D + new_index]) * (1 - epislon);
+		on_prob_temp *= 1 - pow(1 - lambda, z_by_ry[nth * D + new_index] + 1) * (1 - epsilon);
+		off_prob_temp *= 1 - pow(1 - lambda, z_by_ry[nth * D + new_index]) * (1 - epsilon);
 	      }
 	    } else {
 	      on_prob_temp *= 1 - lambda;
@@ -1687,7 +1687,7 @@ kernel void sample_z_nosc(global int *cur_y,
 		     global int *obs,
 		     global float *rand,
 		     uint N, uint D, uint K, uint f_img_width,
-		     float lambda, float epislon, float theta) {
+		     float lambda, float epsilon, float theta) {
 
   const uint V_SCALE = 0, H_SCALE = 1, V_TRANS = 2, H_TRANS = 3, NUM_TRANS = 4;
   uint h, w, new_index; // variables used in the for loop
@@ -1720,7 +1720,7 @@ kernel void sample_z_nosc(global int *cur_y,
 
 	    new_index = ((v_dist) % f_img_height) * f_img_width + (h_dist) % f_img_width;
 	    int cur_obs_val = obs[nth*D+new_index];
-	    float cur_pow = pow(1-lambda, z_by_ry[nth*D+new_index]) * (1-epislon);
+	    float cur_pow = pow(1-lambda, z_by_ry[nth*D+new_index]) * (1-epsilon);
 	    float cur_pow_less1 = cur_pow/(1-lambda);
 	    float cur_pow_plus1 = cur_pow*(1-lambda);
 
@@ -1745,7 +1745,7 @@ kernel void sample_r(global int *replace_r, global int *z_by_ry_old, global int 
 		     global float *logprior_old, global float *logprior_new,
 		     global int *obs, global float *rand,
 		     uint N, uint D, uint K,
-		     float lambda, float epislon) {
+		     float lambda, float epsilon) {
 
   uint nth = get_global_id(0);
   float loglik_old = 0;
@@ -1756,11 +1756,11 @@ kernel void sample_r(global int *replace_r, global int *z_by_ry_old, global int 
   }
   for (int dth = 0; dth < D; dth++) {
     if (obs[nth * D + dth] == 1) {
-      loglik_old += log(1 - pow(1 - lambda, z_by_ry_old[nth * D + dth]) * (1 - epislon));
-      loglik_new += log(1 - pow(1 - lambda, z_by_ry_new[nth * D + dth]) * (1 - epislon));
+      loglik_old += log(1 - pow(1 - lambda, z_by_ry_old[nth * D + dth]) * (1 - epsilon));
+      loglik_new += log(1 - pow(1 - lambda, z_by_ry_new[nth * D + dth]) * (1 - epsilon));
     } else {
-      loglik_old += log(1 - lambda) * z_by_ry_old[nth * D + dth] + log(1 - epislon);
-      loglik_new += log(1 - lambda) * z_by_ry_new[nth * D + dth] + log(1 - epislon);
+      loglik_old += log(1 - lambda) * z_by_ry_old[nth * D + dth] + log(1 - epsilon);
+      loglik_new += log(1 - lambda) * z_by_ry_new[nth * D + dth] + log(1 - epsilon);
     }
   }
   float move_prob = 1 / (1 + exp(loglik_old - loglik_new));
@@ -1812,7 +1812,7 @@ kernel void loglik(global int *z_by_ry,
 		   global int *obs,
 		   global float *loglik,
 		   uint N, uint D, uint K,
-		   float lambda, float epislon) {
+		   float lambda, float epsilon) {
 
   uint nth = get_global_id(0); // nth is the index of data
   uint dth = get_global_id(1); // dth is the index of flattened pixels
@@ -1822,8 +1822,8 @@ kernel void loglik(global int *z_by_ry,
   */
   uint weight = z_by_ry[nth * D + dth];
   if (obs[nth * D + dth] == 1) {
-    loglik[nth * D + dth] = log(1 - pow(1 - lambda, weight) * (1 - epislon));
+    loglik[nth * D + dth] = log(1 - pow(1 - lambda, weight) * (1 - epsilon));
   } else {
-    loglik[nth * D + dth] = weight * log(1 - lambda) + log(1 - epislon);
+    loglik[nth * D + dth] = weight * log(1 - lambda) + log(1 - epsilon);
   }
 }

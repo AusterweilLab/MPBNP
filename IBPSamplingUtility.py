@@ -29,7 +29,7 @@ def print_args_summary(args):
 
 parser = argparse.ArgumentParser(description="""
 A sampler for the Indian Buffet Process model with and without OpenCL support.
-Please contact Ting Qian <ting_qian@brown.edu> for questions and feedback.
+Please contact Joseph Austerweil <joseph_austerweil@brown.edu> for questions and feedback.
 """)
 parser.add_argument('--opencl', action='store_true', help='Use OpenCL acceleration')
 parser.add_argument('--opencl_device', choices=['ask', 'gpu', 'cpu'], default='ask', help='The device to use OpenCL acceleration on. Default behavior is asking the user (i.e., you).')
@@ -43,6 +43,10 @@ parser.add_argument('--output_to_stdout', action='store_true', help="Write poste
 parser.add_argument('--output_mode', choices=['best', 'all'], default='best', help='Output mode. Default is keeping only the sample that yields the highest logliklihood of data. The other option is to keep all samples.')
 parser.add_argument('--chain', '-c', type=int, default=1, help='The number of chains to run. Default is 1.')
 parser.add_argument('--distributed_chains', action='store_true', default=False, help="If there are multiple OpenCL devices, distribute chains across them. Default is no. Will not distribute to CPUs if GPU is specified in opencl_device, and vice versa")
+parser.add_argument('--epsilon',default=.02, type=float, help="Sets the epsilon parameter (prob. pixels on by chance) via command line")
+parser.add_argument('--lam',default=.98, type=float, help="Sets the lambda parameter (prob. a feature turns on a pixel it is supposed to turn on")
+parser.add_argument('--theta',default=.2, type=float, help="Sets the theta parameter (prior prob. a pixel in a feature image is on). Small values promote feature images with few pixels turned on (large the opposite)")
+
 
 # parse and print out the arguments
 args = parser.parse_args()
@@ -63,7 +67,8 @@ output_path = os.path.dirname(os.path.realpath(args.data_file)) + '/'
 # set up the sampler
 if args.kernel == 'noisyor':
     c = ibp.noisyor.Gibbs(cl_mode = args.opencl, cl_device = args.opencl_device,
-                          record_best = args.output_mode == 'best')
+                          record_best = args.output_mode == 'best', epsilon = args.epsilon,
+                          lam = args.lam, theta = args.theta)
 elif args.kernel == 'noisyortwoy-uniform':
     c = ibp.noisyortwoy.UniformGibbs(cl_mode = args.opencl, cl_device = args.opencl_device)
 elif args.kernel == 'noisyortwoy-biased':
@@ -77,7 +82,7 @@ for chain in xrange(args.chain):
     # set up the output file
     if args.output_to_file: 
         if args.opencl:
-            sample_dest = output_path + input_filename + '-%d-%s-chain-%d-cl/' % (args.iter - args.burnin, args.kernel, chain + 1)
+            sample_dest = output_path + input_filename + '-%d-%s-chain-%d-e-%f-lam-%f-theta-%f-cl/' % (args.iter - args.burnin, args.kernel, chain + 1, args.epsilon, args.lam, args.theta)
         else:
             sample_dest = output_path + input_filename + '-%d-%s-chain-%d-nocl/' % (args.iter - args.burnin, args.kernel, chain + 1)
     elif args.output_to_stdout:

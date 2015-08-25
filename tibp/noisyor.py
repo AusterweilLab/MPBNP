@@ -42,7 +42,7 @@ class Gibbs(BaseSampler):
     NUM_TRANS = 2
     
     def __init__(self, cl_mode = True, cl_device = None, record_best = True,
-                 alpha = None, lam = 0.999, theta = 0.2, epislon = 0.001,
+                 alpha = None, lam = 0.99, theta = 0.3, epsilon = 0.01,
                  sim_annealP = True, init_k = 10, T_init=40., anneal_rate = .9999,
                  splitProb = 0.5, split_mergeP = True, split_steps=20,
                  splitAdj = 1):
@@ -58,7 +58,7 @@ class Gibbs(BaseSampler):
         self.k = init_k    # initial number of features
         self.theta = theta # prior probability that a pixel is on in a feature image
         self.lam = lam # efficacy of a feature
-        self.epislon = epislon # probability that a pixel is on by change in an actual image
+        self.epsilon = epsilon # probability that a pixel is on by change in an actual image
         self.phi = 0.5 # prior probability that no transformation is applied
         self.samples = {'z': [], 'y': [], 'r': []} # sample storage, to be pickled
         self.k_max_new = 10 # nax number of new features in one iteration
@@ -91,8 +91,6 @@ class Gibbs(BaseSampler):
                 #self.d_obs = cl.Buffer(self.ctx, self.mf.READ_ONLY | self.mf.COPY_HOST_PTR, hostbuf=self.obs.astype(np.int32))
                 self.d_obs = clarray.Array(self.queue, shape=self.obs.shape, dtype=np.int32)
                 self.d_obs.set(self.obs)
-
-
         else:
             BaseSampler.read_csv(self, filepath, header)
             # convert the data to floats
@@ -201,7 +199,7 @@ class Gibbs(BaseSampler):
                 num_of_feats = final_z.shape[1]
                 print('parameter,value',
                       'alpha,%f' % self.alpha, 'lambda,%f' % self.lam, 'theta,%f' % self.theta,
-                      'epislon,%f' % self.epislon, 'phi,%f' % self.phi, 'inferred_K,%d' % num_of_feats,
+                      'epsilon,%f' % self.epsilon, 'phi,%f' % self.phi, 'inferred_K,%d' % num_of_feats,
                       'gpu_time,%f' % timing_stats[0], 'total_time,%f' % timing_stats[1],
                       file = output_file, sep = '\n')
                 
@@ -246,7 +244,7 @@ class Gibbs(BaseSampler):
                 except: pass
                 print('parameter,value',
                       'alpha,%f' % self.alpha, 'lambda,%f' % self.lam, 'theta,%f' % self.theta,
-                      'epislon,%f' % self.epislon, 'phi,%f' % self.phi, 'inferred_K,%d' % num_of_feats,
+                      'epsilon,%f' % self.epsilon, 'phi,%f' % self.phi, 'inferred_K,%d' % num_of_feats,
                       'gpu_time,%f' % timing_stats[0], 'total_time,%f' % timing_stats[1],
                       file = gzip.open(output_file + 'parameters.csv.gz', 'w'), sep = '\n')
                 
@@ -271,7 +269,7 @@ class Gibbs(BaseSampler):
                 except: pass
                 print('parameter,value',
                       'alpha,%f' % self.alpha, 'lambda,%f' % self.lam, 'theta,%f' % self.theta,
-                      'epislon,%f' % self.epislon, 'phi,%f' % self.phi,
+                      'epsilon,%f' % self.epsilon, 'phi,%f' % self.phi,
                       'gpu_time,%f' % timing_stats[0], 'total_time,%f' % timing_stats[1],
                       file = gzip.open(output_file + 'parameters.csv.gz', 'w'), sep = '\n')
                 np.savez_compressed(output_file + 'feature_ownership.npz', self.samples['z'])
@@ -508,20 +506,20 @@ class Gibbs(BaseSampler):
         else:
             self.lam = old_lam
 
-    def _sample_epislon(self, cur_y, cur_z):
-        """Resample the value of epislon
+    def _sample_epsilon(self, cur_y, cur_z):
+        """Resample the value of epsilon
         """
         old_loglik = self._loglik(cur_y, cur_z)
-        old_epislon = self.epislon
+        old_epsilon = self.epsilon
     
         # modify the feature ownership matrix
-        self.epislon = np.random.beta(1,1)
+        self.epsilon = np.random.beta(1,1)
         new_loglik = self._loglik(cur_y, cur_z)
         move_prob = 1 / (1 + np.exp(old_loglik - new_loglik));
         if random.random() < move_prob:
             pass
         else:
-            self.epislon = old_epislon
+            self.epsilon = old_epsilon
 
     def _loglik_nth(self, cur_y, cur_z, cur_r, n):
         """Calculate the loglikelihood of the nth data point
@@ -546,7 +544,7 @@ class Gibbs(BaseSampler):
                 nth_y[kth_feat] = h_translate(nth_y[kth_feat], self.img_w, r_feat[self.H_TRANS])
                 kth_feat += 1
                 
-            not_on_p[i] = np.power(1. - self.lam, np.dot(cur_z[nth], nth_y)) * (1. - self.epislon)
+            not_on_p[i] = np.power(1. - self.lam, np.dot(cur_z[nth], nth_y)) * (1. - self.epsilon)
         loglik = np.log(np.abs(self.obs[n] - not_on_p)).sum()
         return loglik
 
@@ -569,7 +567,7 @@ class Gibbs(BaseSampler):
                 nth_y[kth_feat] = h_translate(nth_y[kth_feat], self.img_w, r_feat[self.H_TRANS])
                 kth_feat += 1
                 
-            not_on_p[nth] = np.power(1. - self.lam, np.dot(cur_z[nth], nth_y)) * (1. - self.epislon)
+            not_on_p[nth] = np.power(1. - self.lam, np.dot(cur_z[nth], nth_y)) * (1. - self.epsilon)
         
         loglik_mat = np.log(np.abs(self.obs - not_on_p))
         return loglik_mat.sum()
@@ -741,7 +739,7 @@ class Gibbs(BaseSampler):
         self.prg.sample_y(self.queue, cur_y.shape, None,
                           d_cur_y, d_cur_z, d_z_by_ry, d_cur_r, self.d_obs, d_rand,
                           np.int32(self.N), np.int32(self.d), np.int32(cur_y.shape[0]), np.int32(self.img_w),
-                          np.float32(self.lam), np.float32(self.epislon), np.float32(self.theta))
+                          np.float32(self.lam), np.float32(self.epsilon), np.float32(self.theta))
 
         self.gpu_time += time() - a_time
         return d_cur_y
@@ -768,7 +766,7 @@ class Gibbs(BaseSampler):
         self.prg.sample_y_nosc(self.queue, cur_y.shape, None,
                           d_cur_y, d_cur_z, d_z_by_ry, d_cur_r, self.d_obs, d_rand,
                           np.int32(self.N), np.int32(self.d), np.int32(cur_y.shape[0]), np.int32(self.img_w),
-                          np.float32(self.lam), np.float32(self.epislon), np.float32(self.theta))
+                          np.float32(self.lam), np.float32(self.epsilon), np.float32(self.theta))
 
         self.gpu_time += time() - a_time
         return d_cur_y
@@ -799,7 +797,7 @@ class Gibbs(BaseSampler):
         self.prg.sample_z(self.queue, cur_z.shape, None,
                           d_cur_y, d_cur_z, d_cur_r, d_z_by_ry, d_z_col_sum, self.d_obs, d_rand,
                           np.int32(self.N), np.int32(self.d), np.int32(cur_y.shape[0]), np.int32(self.img_w),
-                          np.float32(self.lam), np.float32(self.epislon), np.float32(self.theta))
+                          np.float32(self.lam), np.float32(self.epsilon), np.float32(self.theta))
 
         self.gpu_time += time() - a_time
         return d_cur_z
@@ -875,7 +873,7 @@ class Gibbs(BaseSampler):
         self.prg.calc_lp_fornew(self.queue, (N, K, self.k_max_new+1), None,
                          d_obj_recon, self.d_obs, d_lps,
                          np.int32(N), np.int32(D), np.int32(K), np.int32(self.k_max_new+1),
-                         np.float32(self.lam), np.float32(self.epislon), np.float32(self.theta))
+                         np.float32(self.lam), np.float32(self.epsilon), np.float32(self.theta))
 
         cl.enqueue_copy(self.queue, lps, d_lps)
         KNewRng =  np.arange(K, self.k_max_new+1+K)
@@ -940,7 +938,7 @@ class Gibbs(BaseSampler):
             self.prg.new_y_val_probs(self.queue, (num_d_workers, N, totNewK), (workGroupSize, 1,1), d_locmemInt,
                                        d_cur_z, d_cur_y, d_cur_r, d_comb_vec, d_obj_recon, self.d_obs,
                                        d_new_y_val_probs, np.int32(N), np.int32(K), np.int32(D), np.int32(totNewK),
-                                       np.float32(self.lam), np.float32(self.epislon), np.float32(self.theta))
+                                       np.float32(self.lam), np.float32(self.epsilon), np.float32(self.theta))
 
         cl.enqueue_copy(self.queue, new_y_val_probs, d_new_y_val_probs)
         #normalize with appropriate k_new per x
@@ -1022,18 +1020,18 @@ class Gibbs(BaseSampler):
                     self.prg.calc_y_lps_old(self.queue, (curNumToRun,K,D), (curNumToRun, 1,1), d_locmemFlt, d_cur_y.data, d_cur_z.data,
                                         d_obj_recon.data, self.d_obs.data, d_lp_off.data, d_lp_on.data,
                                         np.int32(N), np.int32(D), np.int32(K), np.int32(numPrevRun),
-                                        np.float32(self.lam), np.float32(self.epislon), np.float32(self.theta))
+                                        np.float32(self.lam), np.float32(self.epsilon), np.float32(self.theta))
                 else:
                     self.prg.calc_y_lp_off(self.queue, (curNumToRun,K,D), (curNumToRun, 1,1),
                                        d_locmemFlt, d_cur_y.data, d_cur_z.data,
                                        d_obj_recon.data, self.d_obs.data, d_lp_off.data,
                                        np.int32(N), np.int32(D), np.int32(K), np.int32(numPrevRun),
-                                       np.float32(self.lam), np.float32(self.epislon), np.float32(self.theta))
+                                       np.float32(self.lam), np.float32(self.epsilon), np.float32(self.theta))
                     self.prg.calc_y_lp_off(self.queue, (curNumToRun,K,D), (curNumToRun, 1,1),
                                        d_locmemFlt, d_cur_y.data, d_cur_z.data,
                                        d_obj_recon.data, self.d_obs.data, d_lp_on.data,
                                        np.int32(N), np.int32(D), np.int32(K), np.int32(numPrevRun),
-                                       np.float32(self.lam), np.float32(self.epislon), np.float32(self.theta))
+                                       np.float32(self.lam), np.float32(self.epsilon), np.float32(self.theta))
                 numToRun -= curNumToRun
                 numPrevRun += curNumToRun
 
@@ -1090,7 +1088,7 @@ class Gibbs(BaseSampler):
                                     d_obj_recon.data, d_lp_nkr_on.data, d_lp_nk_off.data,
                                     self.d_obs.data,
                                     np.int32(N), np.int32(K), np.int32(D), np.int32(self.img_w),
-                                    np.float32(self.lam), np.float32(self.epislon), np.float32(self.theta))
+                                    np.float32(self.lam), np.float32(self.epsilon), np.float32(self.theta))
 
            # nk_rmax = np.require(np.empty(shape = (self.obs.shape[0], cur_z.shape[1]), dtype=np.float32),
                                  #dtype = np.float32, requirements=['C','A'])
@@ -1210,7 +1208,7 @@ class Gibbs(BaseSampler):
             #                         d_lp_nk_rmax, d_rsums, d_z_col_sum, self.d_obs,
             #                         d_rand_z, d_rand_r, np.int32(cur_z.shape[0]),
             #                         np.int32(cur_y.shape[1]), np.int32(cur_y.shape[0]), np.int32(self.img_w),
-            #                          np.float32(self.lam), np.float32(self.epislon), np.float32(self.theta))
+            #                          np.float32(self.lam), np.float32(self.epsilon), np.float32(self.theta))
 
         #    tmpRSums = np.require(np.zeros(shape=(N,K,D), dtype=np.float32), dtype=np.float32, requirements=['C','A'])
         #    cl.enqueue_copy(self.queue, tmpRSums, d_rsums)
@@ -1225,7 +1223,7 @@ class Gibbs(BaseSampler):
             #                         d_lp_nk_rmax, d_rsums, d_z_col_sum, self.d_obs,
             #                         d_rand_z, d_rand_r, np.int32(cur_z.shape[0]),
             #                         np.int32(cur_y.shape[1]), np.int32(cur_y.shape[0]), np.int32(self.img_w),
-            #                          np.float32(self.lam), np.float32(self.epislon), np.float32(self.theta))
+            #                          np.float32(self.lam), np.float32(self.epsilon), np.float32(self.theta))
 
             self.gpu_time += time() - a_time
             #for debuggin gonly:\
@@ -1257,7 +1255,7 @@ class Gibbs(BaseSampler):
         self.prg.sample_z_nosc(self.queue, cur_z.shape, None,
                           d_cur_y, d_cur_z, d_cur_r, d_z_by_ry, d_z_col_sum, self.d_obs, d_rand,
                           np.int32(self.N), np.int32(self.d), np.int32(cur_y.shape[0]), np.int32(self.img_w),
-                          np.float32(self.lam), np.float32(self.epislon), np.float32(self.theta))
+                          np.float32(self.lam), np.float32(self.epsilon), np.float32(self.theta))
 
         self.gpu_time += time() - a_time
         return d_cur_z
@@ -1337,7 +1335,7 @@ class Gibbs(BaseSampler):
             d_lps = self.d_recon_lps.fill(0.)
             self.prg.calc_lps(self.queue, (N,D), None,
                               d_obj_recon.data, self.d_obs.data, d_lps.data,
-                              np.int32(N), np.int32(D), np.float32(self.lam), np.float32(self.epislon))
+                              np.int32(N), np.int32(D), np.float32(self.lam), np.float32(self.epsilon))
 
             lpX = clarray.sum(d_lps).get()
 
@@ -1461,7 +1459,7 @@ class Gibbs(BaseSampler):
             self.prg.calc_lp_fornew(self.queue, (N, D, self.k_max_new+1), None,
                                     d_obj_recon.data, self.d_obs.data, d_lps.data,
                                     np.int32(N), np.int32(K), np.int32(D), np.int32(self.k_max_new+1),
-                                    np.float32(self.lam), np.float32(self.epislon), np.float32(self.theta))
+                                    np.float32(self.lam), np.float32(self.epsilon), np.float32(self.theta))
 
             # cl.enqueue_copy(self.queue, lps, d_lps)
             lps = d_lps.get()
@@ -1553,7 +1551,7 @@ class Gibbs(BaseSampler):
                                           d_obj_recon.data, self.d_obs.data,
                                           d_new_y_val_probs.data, np.int32(new_k_ind), np.int32(new_k),
                                           np.int32(N), np.int32(D), np.int32(K),
-                                          np.float32(self.lam), np.float32(self.epislon), np.float32(self.theta))
+                                          np.float32(self.lam), np.float32(self.epsilon), np.float32(self.theta))
 
 
                 #cl.enqueue_copy(self.queue, new_y_val_probs, d_new_y_val_probs)
@@ -1655,7 +1653,7 @@ class Gibbs(BaseSampler):
                           d_replace_r.data, d_z_by_ry_old.data, d_z_by_ry_new.data,
                           d_logprior_old, d_logprior_new, self.d_obs, d_rand,
                           np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_y.shape[0]),
-                          np.float32(self.lam), np.float32(self.epislon))
+                          np.float32(self.lam), np.float32(self.epsilon))
 
         replace_r = d_replace_r.get()
         cur_r[np.where(replace_r == 1)] = cur_r_new[np.where(replace_r == 1)]
@@ -1689,7 +1687,7 @@ class Gibbs(BaseSampler):
                           d_replace_r.data, d_z_by_ry_old.data, d_z_by_ry_new.data,
                           d_logprior_old, d_logprior_new, self.d_obs, d_rand,
                           np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_y.shape[0]),
-                          np.float32(self.lam), np.float32(self.epislon))
+                          np.float32(self.lam), np.float32(self.epsilon))
 
         replace_r = d_replace_r.get()
         cur_r[np.where(replace_r == 1)] = cur_r_new[np.where(replace_r == 1)]
@@ -1723,7 +1721,7 @@ class Gibbs(BaseSampler):
                           d_replace_r.data, d_z_by_ry_old.data, d_z_by_ry_new.data,
                           d_logprior_old, d_logprior_new, self.d_obs, d_rand,
                           np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_y.shape[0]),
-                          np.float32(self.lam), np.float32(self.epislon))
+                          np.float32(self.lam), np.float32(self.epsilon))
 
         replace_r = d_replace_r.get()
         cur_r[np.where(replace_r == 1)] = cur_r_new[np.where(replace_r == 1)]
@@ -1757,7 +1755,7 @@ class Gibbs(BaseSampler):
                           d_replace_r.data, d_z_by_ry_old.data, d_z_by_ry_new.data,
                           d_logprior_old, d_logprior_new, self.d_obs, d_rand,
                           np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_y.shape[0]),
-                          np.float32(self.lam), np.float32(self.epislon))
+                          np.float32(self.lam), np.float32(self.epsilon))
 
         replace_r = d_replace_r.get()
         cur_r[np.where(replace_r == 1)] = cur_r_new[np.where(replace_r == 1)]
@@ -1813,7 +1811,7 @@ class Gibbs(BaseSampler):
                           d_replace_r.data, d_z_by_ry_old.data, d_z_by_ry_new.data,
                           d_logprior_old, d_logprior_new, self.d_obs, d_rand,
                           np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_y.shape[0]),
-                          np.float32(self.lam), np.float32(self.epislon))
+                          np.float32(self.lam), np.float32(self.epsilon))
 
         replace_r = d_replace_r.get()
         cur_r[np.where(replace_r == 1)] = cur_r_new[np.where(replace_r == 1)]
@@ -1847,7 +1845,7 @@ class Gibbs(BaseSampler):
                           d_replace_r.data, d_z_by_ry_old.data, d_z_by_ry_new.data,
                           d_logprior_old, d_logprior_new, self.d_obs, d_rand,
                           np.int32(self.obs.shape[0]), np.int32(self.obs.shape[1]), np.int32(cur_y.shape[0]),
-                          np.float32(self.lam), np.float32(self.epislon))
+                          np.float32(self.lam), np.float32(self.epsilon))
 
         replace_r = d_replace_r.get()
         cur_r[np.where(replace_r == 1)] = cur_r_new[np.where(replace_r == 1)]
@@ -1858,14 +1856,14 @@ class Gibbs(BaseSampler):
 class GibbsPredictor(BasePredictor):
 
     def __init__(self, cl_mode = True, cl_device = None,
-                 alpha = 1.0, lam = 0.98, theta = 0.01, epislon = 0.02, init_k = 4):
+                 alpha = 1.0, lam = 0.98, theta = 0.01, epsilon = 0.02, init_k = 4):
         """Initialize the predictor.
         """
         BasePredictor.__init__(self, cl_mode = cl_mode, cl_device = cl_device)
         self.alpha = alpha
         self.lam = lam
         self.theta = theta
-        self.epislon = epislon
+        self.epsilon = epsilon
 
     def read_test_csv(self, file_path, header=True):
         """Read the test cases and convert values to integer.
@@ -1941,7 +1939,7 @@ class GibbsPredictor(BasePredictor):
 
             # BEGIN p(x|z, y_inferred)
             n_by_d = np.dot(all_z, cur_y)
-            not_on_p = np.power(1. - self.lam, n_by_d) * (1. - self.epislon)
+            not_on_p = np.power(1. - self.lam, n_by_d) * (1. - self.epsilon)
             for j in xrange(len(self.obs)):
                 prob = np.abs(self.obs[j] - not_on_p).prod(axis=1) 
                 prob = prob #* prior_prob

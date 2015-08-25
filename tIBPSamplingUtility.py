@@ -43,6 +43,9 @@ parser.add_argument('--output_to_stdout', action='store_true', help="Write poste
 parser.add_argument('--output_mode', choices=['best', 'all'], default='best', help='Output mode. Default is keeping only the sample that yields the highest logliklihood of data. The other option is to keep all samples.')
 parser.add_argument('--chain', '-c', type=int, default=1, help='The number of chains to run. Default is 1.')
 parser.add_argument('--distributed_chains', action='store_true', default=False, help="If there are multiple OpenCL devices, distribute chains across them. Default is no. Will not distribute to CPUs if GPU is specified in opencl_device, and vice versa")
+parser.add_argument('--epsilon',default=.02, type=float, help="Sets the epsilon parameter (prob. pixels on by chance) via command line")
+parser.add_argument('--lam',default=.98, type=float, help="Sets the lambda parameter (prob. a feature turns on a pixel it is supposed to turn on")
+parser.add_argument('--theta',default=.2, type=float, help="Sets the theta parameter (prior prob. a pixel in a feature image is on). Small values promote feature images with few pixels turned on (large the opposite)")
 
 # parse and print out the arguments
 args = parser.parse_args()
@@ -62,7 +65,8 @@ output_path = os.path.dirname(os.path.realpath(args.data_file)) + '/'
 # set up the sampler
 if args.kernel == 'noisyor':
     c = tibp.noisyor.Gibbs(cl_mode = args.opencl, cl_device = args.opencl_device,
-                          record_best = args.output_mode == 'best')
+                          record_best = args.output_mode == 'best', epsilon=args.epsilon,
+                           lam=args.lam, theta=args.theta)
 else:
     sys.exit()
 c.read_csv(args.data_file)

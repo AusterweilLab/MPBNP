@@ -103,7 +103,7 @@ kernel void init_2bufferInt(global int* data1, global int* data2, uint len, int 
 
 kernel void sample_yJLA(local float* locmem, global int* cur_y, global int *cur_z, global int* cur_recon,
 			global int* obs, global float*rand, uint N, uint D, uint K,
-			float lambda, float epislon, float theta) {
+			float lambda, float epsilon, float theta) {
   int nth = get_global_id(0);
   int kth = get_global_id(1);
   int dth = get_global_id(2);
@@ -122,9 +122,9 @@ kernel void sample_yJLA(local float* locmem, global int* cur_y, global int *cur_
   barrier(CLK_LOCAL_MEM_FENCE);
   int my_y_val = (int) locmem[0];
   
-  float pow_val = native_powr(1-lambda, my_recon) * (1-epislon);
-  float pow_val_less1 = native_powr(1-lambda, max(my_recon-1,0)) * (1-epislon);
-  float pow_val_plus1 = native_powr(1-lambda, my_recon+1) * (1-epislon);
+  float pow_val = native_powr(1-lambda, my_recon) * (1-epsilon);
+  float pow_val_less1 = native_powr(1-lambda, max(my_recon-1,0)) * (1-epsilon);
+  float pow_val_plus1 = native_powr(1-lambda, my_recon+1) * (1-epsilon);
 
   // lpOff
   locmem[1+lid] = my_z_val * my_y_val * my_obs_val * log(1-pow_val_less1)
@@ -160,7 +160,7 @@ kernel void sample_yJLA(local float* locmem, global int* cur_y, global int *cur_
 kernel void calc_y_lps_old(local float* locmem, global int* cur_y, global int *cur_z, global int* cur_recon,
 		       global int* obs, global float* lp_off, global float* lp_on,
 		       uint N, uint D, uint K, uint numPrevRun,
-		       float lambda, float epislon, float theta) {
+		       float lambda, float epsilon, float theta) {
   int nth = get_global_id(0) + numPrevRun;
   int numRun = get_global_size(0);
   int kth = get_global_id(1);
@@ -186,9 +186,9 @@ kernel void calc_y_lps_old(local float* locmem, global int* cur_y, global int *c
 
   int my_y_val =cur_y[my_y_ind];
   //int my_y_val = cur_y[my_y_ind];
-  float pow_val = native_powr(1-lambda, my_recon) * (1-epislon);
-  float pow_val_less1 = native_powr(1-lambda, max(my_recon-1,0)) * (1-epislon);
-  float pow_val_plus1 = native_powr(1-lambda, my_recon+1) * (1-epislon);
+  float pow_val = native_powr(1-lambda, my_recon) * (1-epsilon);
+  float pow_val_less1 = native_powr(1-lambda, max(my_recon-1,0)) * (1-epsilon);
+  float pow_val_plus1 = native_powr(1-lambda, my_recon+1) * (1-epsilon);
 
   // lpOff
   locmem[lid] = my_z_val * my_y_val * my_obs_val * log(1-pow_val_less1)
@@ -236,7 +236,7 @@ kernel void calc_y_lps_old(local float* locmem, global int* cur_y, global int *c
 kernel void calc_y_lps(local float* locmem, global int* cur_y, global int *cur_z, global int* cur_recon,
 		       global int* obs, global float* lp_off, global float* lp_on,
 		       uint N, uint D, uint K, uint numPrevRun,
-		       float lambda, float epislon, float theta) {
+		       float lambda, float epsilon, float theta) {
   int nth = get_global_id(0) + numPrevRun;
   int numRun = get_global_size(0);
   int kth = get_global_id(1);
@@ -263,9 +263,9 @@ kernel void calc_y_lps(local float* locmem, global int* cur_y, global int *cur_z
 
     int my_y_val =cur_y[my_y_ind];
     //int my_y_val = cur_y[my_y_ind];
-    float pow_val = native_powr(1-lambda, my_recon) * (1-epislon);
-    float pow_val_less1 = native_powr(1-lambda, max(my_recon-1,0)) * (1-epislon);
-    float pow_val_plus1 = native_powr(1-lambda, my_recon+1) * (1-epislon);
+    float pow_val = native_powr(1-lambda, my_recon) * (1-epsilon);
+    float pow_val_less1 = native_powr(1-lambda, max(my_recon-1,0)) * (1-epsilon);
+    float pow_val_plus1 = native_powr(1-lambda, my_recon+1) * (1-epsilon);
 
     // lpOff
     locmem[lid] = my_z_val * my_y_val * my_obs_val * log(1-pow_val_less1)
@@ -318,7 +318,7 @@ kernel void calc_y_lps(local float* locmem, global int* cur_y, global int *cur_z
 kernel void calc_y_lp_off(local float* locmem, global int* cur_y, global int *cur_z, global int* cur_recon,
 		       global int* obs, global float* lp_off, 
 		       uint N, uint D, uint K, uint numPrevRun,
-		       float lambda, float epislon, float theta) {
+		       float lambda, float epsilon, float theta) {
   int nth = get_global_id(0) + numPrevRun;
   int numRun = get_global_size(0);
   int kth = get_global_id(1);
@@ -338,9 +338,9 @@ kernel void calc_y_lp_off(local float* locmem, global int* cur_y, global int *cu
 
   int my_y_val =cur_y[my_y_ind];
 
-  float pow_val = native_powr(1-lambda, my_recon) * (1-epislon);
-  float pow_val_less1 = native_powr(1-lambda, max(my_recon-1,0)) * (1-epislon);
-  float pow_val_plus1 = native_powr(1-lambda, my_recon+1) * (1-epislon);
+  float pow_val = native_powr(1-lambda, my_recon) * (1-epsilon);
+  float pow_val_less1 = native_powr(1-lambda, max(my_recon-1,0)) * (1-epsilon);
+  float pow_val_plus1 = native_powr(1-lambda, my_recon+1) * (1-epsilon);
 
   // lpOff
   locmem[lid] = my_z_val * my_y_val * my_obs_val * log(1-pow_val_less1)
@@ -377,7 +377,7 @@ kernel void calc_y_lp_off(local float* locmem, global int* cur_y, global int *cu
 kernel void calc_y_lp_on(local float* locmem, global int* cur_y, global int *cur_z, global int* cur_recon,
 		       global int* obs, global float* lp_on,
 		       uint N, uint D, uint K, uint numPrevRun,
-		       float lambda, float epislon, float theta) {
+		       float lambda, float epsilon, float theta) {
   int nth = get_global_id(0) + numPrevRun;
 
   int numRun = get_global_size(0);
@@ -394,9 +394,9 @@ kernel void calc_y_lp_on(local float* locmem, global int* cur_y, global int *cur
  
   int my_y_val =cur_y[my_y_ind];
 
-  float pow_val = native_powr(1-lambda, my_recon) * (1-epislon);
-  float pow_val_less1 = native_powr(1-lambda, max(my_recon-1,0)) * (1-epislon);
-  float pow_val_plus1 = native_powr(1-lambda, my_recon+1) * (1-epislon);
+  float pow_val = native_powr(1-lambda, my_recon) * (1-epsilon);
+  float pow_val_less1 = native_powr(1-lambda, max(my_recon-1,0)) * (1-epsilon);
+  float pow_val_plus1 = native_powr(1-lambda, my_recon+1) * (1-epsilon);
 
   locmem[lid] = my_z_val * my_y_val * my_obs_val * log(1-pow_val)
     + my_z_val * my_y_val * (1-my_obs_val) * log(pow_val)
@@ -433,7 +433,7 @@ kernel void calc_y_lp_on(local float* locmem, global int* cur_y, global int *cur
 kernel void calc_y_lps_noLcl(local float* locmem, global int* cur_y, global int *cur_z, global int* cur_recon,
 		       global int* obs, global float* lp_off, global float* lp_on,
 		       uint N, uint D, uint K, uint numPrevRun,
-		       float lambda, float epislon, float theta) {
+		       float lambda, float epsilon, float theta) {
   int nth = get_global_id(0) + numPrevRun;
   int numRun = get_global_size(0);
   int kth = get_global_id(1);
@@ -459,9 +459,9 @@ kernel void calc_y_lps_noLcl(local float* locmem, global int* cur_y, global int 
       int my_obs_val = obs[obs_ind];
       int my_recon = cur_recon[obs_ind];
       int my_z_val = cur_z[n*K+kth];
-      float pow_val = native_powr(1-lambda, my_recon) * (1-epislon);
-      float pow_val_less1 = native_powr(1-lambda, max(my_recon-1,0)) * (1-epislon);
-      float pow_val_plus1 = native_powr(1-lambda, my_recon+1) * (1-epislon);
+      float pow_val = native_powr(1-lambda, my_recon) * (1-epsilon);
+      float pow_val_less1 = native_powr(1-lambda, max(my_recon-1,0)) * (1-epsilon);
+      float pow_val_plus1 = native_powr(1-lambda, my_recon+1) * (1-epsilon);
 
 
       lpOffSum += my_z_val * my_y_val * my_obs_val * log(1-pow_val_less1)
@@ -513,7 +513,7 @@ kernel void sample_y(global int *cur_y,
 		     global int *obs,
 		     global float *rand, //global float *on_loglik, global float *off_loglik,
 		     uint N, uint D, uint K,
-		     float lambda, float epislon, float theta) {
+		     float lambda, float epsilon, float theta) {
   
   uint kth = get_global_id(0); // k is the index of features
   uint dth = get_global_id(1); // d is the index of pixels
@@ -534,8 +534,8 @@ kernel void sample_y(global int *cur_y,
       if (obs[n * D + dth] == 1) {
 	cur_y_kd = cur_y[kth * D + dth];
 	// if the feature image previously has this pixel on
-	  on_loglik_temp += cur_y_kd*log(1 - pow(1 - lambda, z_by_y_nth) * (1 - epislon)) + (1-cur_y_kd)*log(1 - pow(1 - lambda, z_by_y_nth + 1) * (1 - epislon));
-	  off_loglik_temp +=  cur_y_kd*log(1 - pow(1 - lambda, z_by_y_nth - 1) * (1 - epislon))+(1- cur_y_kd)* log(1 - pow(1 - lambda, z_by_y_nth) * (1 - epislon));
+	  on_loglik_temp += cur_y_kd*log(1 - pow(1 - lambda, z_by_y_nth) * (1 - epsilon)) + (1-cur_y_kd)*log(1 - pow(1 - lambda, z_by_y_nth + 1) * (1 - epsilon));
+	  off_loglik_temp +=  cur_y_kd*log(1 - pow(1 - lambda, z_by_y_nth - 1) * (1 - epsilon))+(1- cur_y_kd)* log(1 - pow(1 - lambda, z_by_y_nth) * (1 - epsilon));
 	
       } else {
 	on_loglik_temp += log(1 - lambda);
@@ -557,7 +557,7 @@ kernel void sample_z(global int *cur_y,
 		     global int *obs,
 		     global float *rand, 
 		     uint N, uint D, uint K,
-		     float lambda, float epislon, float theta, float T) {
+		     float lambda, float epsilon, float theta, float T) {
   
   uint nth = get_global_id(0); // n is the index of data
   uint kth = get_global_id(1); // k is the index of features
@@ -576,11 +576,11 @@ kernel void sample_z(global int *cur_y,
       if (obs[nth * D + d] == 1) {
 	// if the nth object previously has the kth feature
 	if (cur_z[nth * K + kth] == 1) {
-	  on_prob_temp *= 1 - pow(1 - lambda, z_by_y_dth) * (1 - epislon);
-	  off_prob_temp *= 1 - pow(1 - lambda, z_by_y_dth - 1) * (1 - epislon);
+	  on_prob_temp *= 1 - pow(1 - lambda, z_by_y_dth) * (1 - epsilon);
+	  off_prob_temp *= 1 - pow(1 - lambda, z_by_y_dth - 1) * (1 - epsilon);
 	} else {
-	  on_prob_temp *= 1 - pow(1 - lambda, z_by_y_dth + 1) * (1 - epislon);
-	  off_prob_temp *= 1 - pow(1 - lambda, z_by_y_dth) * (1 - epislon);
+	  on_prob_temp *= 1 - pow(1 - lambda, z_by_y_dth + 1) * (1 - epsilon);
+	  off_prob_temp *= 1 - pow(1 - lambda, z_by_y_dth) * (1 - epsilon);
 	}
       } else {
 	on_prob_temp *= 1 - lambda;
@@ -603,7 +603,7 @@ kernel void calc_z_lps(local float* locmem, global int *cur_y,  global int *cur_
 		       global int* cur_recon, global int *z_col_sum, global int *obs,
 		       global float* lp_off, global float* lp_on,
 		       uint N, uint D, uint K, uint numPrevRun,
-		       float lambda, float epislon, float theta) {
+		       float lambda, float epsilon, float theta) {
   int nth = get_global_id(0)+numPrevRun;
   int numRun = get_global_size(0);
   int kth = get_global_id(1);
@@ -625,9 +625,9 @@ kernel void calc_z_lps(local float* locmem, global int *cur_y,  global int *cur_
   //barrier(CLK_LOCAL_MEM_FENCE);
   //int my_y_val = (int) locmem[0];
     int my_y_val = cur_y[my_y_ind];
-    float pow_val = native_powr(1-lambda, my_recon) * (1-epislon);
-    float pow_val_less1 = native_powr(1-lambda, max(my_recon-1,0))*(1-epislon);
-    float pow_val_plus1 = native_powr(1-lambda, my_recon+1)*(1-epislon);
+    float pow_val = native_powr(1-lambda, my_recon) * (1-epsilon);
+    float pow_val_less1 = native_powr(1-lambda, max(my_recon-1,0))*(1-epsilon);
+    float pow_val_plus1 = native_powr(1-lambda, my_recon+1)*(1-epsilon);
 
   // lpOff
     lp_off[myNKInd] = my_z_val * my_y_val * my_obs_val * log(1-pow_val_less1)
@@ -879,7 +879,7 @@ kernel void logprob_z_data(global int *cur_z,
 			   global int *obs,
 			   global float *logprob,
 			   uint N, uint D, uint K,
-			   float alpha, float lambda, float epislon) {
+			   float alpha, float lambda, float epsilon) {
 
   uint nth = get_global_id(0); // n is the index of data
   uint m;
@@ -919,9 +919,9 @@ kernel void logprob_z_data(global int *cur_z,
       weight += cur_y[k * D + d] * cur_z[nth * K + k];
     }
     if (obs[nth * D + d] == 1) {
-      logprob_temp += log(1 - pow(1 - lambda, weight) * (1 - epislon));
+      logprob_temp += log(1 - pow(1 - lambda, weight) * (1 - epsilon));
     } else {
-      logprob_temp += weight * log(1 - lambda) + log(1 - epislon);
+      logprob_temp += weight * log(1 - lambda) + log(1 - epsilon);
     }
   }
   logprob[nth] = logprob_temp;
@@ -983,7 +983,7 @@ kernel void compute_recon_objs_andzsums(global int*cur_y, global int* cur_z, glo
  }
 
 kernel void calc_lps(global int * obj_recon, global int* obs, global float* lps,
-                    uint N, uint D, float lambda, float epislon) {
+                    uint N, uint D, float lambda, float epsilon) {
 
   uint nth = get_global_id(0);
   uint dth = get_global_id(1);
@@ -993,14 +993,14 @@ kernel void calc_lps(global int * obj_recon, global int* obs, global float* lps,
   int my_recon = obj_recon[my_obs_ind];
   int my_obs = obs[my_obs_ind];
 
-  float pow_val = native_powr(1-lambda,my_recon) * (1-epislon);
+  float pow_val = native_powr(1-lambda,my_recon) * (1-epsilon);
   lps[my_obs_ind] = my_obs * log(1-pow_val) + (1-my_obs) * log(pow_val);
 }
 
 
 kernel void calc_lp_fornew(global int* obj_recon, global int* obs, global float* lps,
                     uint N, uint K, uint D, uint KNewMax,
-                    float lambda, float epislon, float theta) {
+                    float lambda, float epsilon, float theta) {
 
   int nth = get_global_id(0);
   int dth = get_global_id(1);
@@ -1014,7 +1014,7 @@ kernel void calc_lp_fornew(global int* obj_recon, global int* obs, global float*
 
   uint mylp_ind = nth*D*KNewMax+dth*KNewMax + k_newth;
   //uint mylp_ind = dth*D*KNewMax + nth*D+k_newth;
-  float pow_val = (1-epislon) * native_powr(1-lambda, my_pred) * native_powr(1-lambda*theta, k_newth);
+  float pow_val = (1-epsilon) * native_powr(1-lambda, my_pred) * native_powr(1-lambda*theta, k_newth);
   lps[mylp_ind] = my_obs_val * log(1-pow_val) + (1-my_obs_val) * log(pow_val);
   //lps[mylp_ind] = (1-my_obs_val) * log(pow_val);
   //printf("nth: %d dth: %d k_newth: %d myobs_idx: %d  myobs: %d mypred: %d: my lpInd:%d  mypow_val %f, mylp: %f\n", nth, dth, k_newth, my_obs_idx, my_obs_val,  my_pred, mylp_ind, pow_val, lps[mylp_ind]);
@@ -1024,7 +1024,7 @@ kernel void new_y_val_probs(local int* locmem, global float* cur_z, global float
                               global int* comb_vec, global int* obj_recon,
                               global int* obs, global float * new_probs,
                               uint N, uint K, uint D, uint newK,
-                              float lambda, float epislon, float theta) {
+                              float lambda, float epsilon, float theta) {
   const int  NEW_K_START = 0;
   int dth = get_global_id(0);
   int nth = get_global_id(1);
@@ -1051,7 +1051,7 @@ kernel void new_y_val_probs(local int* locmem, global float* cur_z, global float
     // int my_recon_val = locmem[MY_RECON];
     int my_recon_val = obj_recon[my_obs_idx];
     int my_knew_choose_val = locmem[NEW_K_START + newKth];
-    float lik_pow_val = native_powr(1-lambda,my_recon_val+newKth) * (1-epislon);
+    float lik_pow_val = native_powr(1-lambda,my_recon_val+newKth) * (1-epsilon);
     float pr_pow_val = my_knew_choose_val * native_powr(theta, newKth) * native_powr(1-theta, newK-newKth);
 
     int my_probs_ind = newKth*N*D + nth*D+dth;
@@ -1139,7 +1139,7 @@ kernel void new_y_val_probs2(local int* locmem, global float* cur_z, global floa
 			     global int* comb_vec, global int* obj_recon,
 			     global int* obs, global float *new_probs,
 			     uint nth, uint new_k, uint N, uint D, uint K,
-			     float lambda, float epislon, float theta) {
+			     float lambda, float epsilon, float theta) {
   const int NEW_K_START = 0;
   //int dBase = get_global_id(0);
   int lid0 = get_local_id(0); // where in cur dim window
@@ -1163,7 +1163,7 @@ kernel void new_y_val_probs2(local int* locmem, global float* cur_z, global floa
     int my_recon_val = obj_recon[my_obs_idx];
     int my_knew_choose_val = locmem[NEW_K_START + newKth];
 
-    float lik_pow_val = native_powr(1-lambda,my_recon_val+newKth) * (1-epislon);
+    float lik_pow_val = native_powr(1-lambda,my_recon_val+newKth) * (1-epsilon);
     float pr_pow_val = my_knew_choose_val * native_powr(theta, newKth) * native_powr(1-theta, new_k-newKth);
     
     int my_probs_ind = newKth*D + dth;
