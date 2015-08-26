@@ -997,7 +997,7 @@ class Gibbs(BaseSampler):
             #afterwards.. same as ibp samp y
             rand_vals = np.require(np.random.random(size = (K, D)),
                                    dtype=np.float32, requirements=['C','A'])
-            d_rand = clarray.Array(self.queue,shape=(K,D),dtype=np.float32)
+            d_rand = clarray.Array(self.queue,shape=(K,D),dtype=np.float32,allocator=self.d_mp)
             d_rand.set(rand_vals)
 
             #TODO: figure out why clrand sometimes raises issues in oclgrind, so that i can use it...
@@ -1027,7 +1027,7 @@ class Gibbs(BaseSampler):
                                        d_obj_recon.data, self.d_obs.data, d_lp_off.data,
                                        np.int32(N), np.int32(D), np.int32(K), np.int32(numPrevRun),
                                        np.float32(self.lam), np.float32(self.epsilon), np.float32(self.theta))
-                    self.prg.calc_y_lp_off(self.queue, (curNumToRun,K,D), (curNumToRun, 1,1),
+                    self.prg.calc_y_lp_on(self.queue, (curNumToRun,K,D), (curNumToRun, 1,1),
                                        d_locmemFlt, d_cur_y.data, d_cur_z.data,
                                        d_obj_recon.data, self.d_obs.data, d_lp_on.data,
                                        np.int32(N), np.int32(D), np.int32(K), np.int32(numPrevRun),
@@ -1096,7 +1096,7 @@ class Gibbs(BaseSampler):
             #                    hostbuf = np.require(
             #                         np.zeros(shape=(self.obs.shape[0], cur_z.shape[1], self.obs.shape[1]), dtype=np.float32),
             #                         dtype = np.float32, requirements=['C','A']))
-            d_rsums = clarray.zeros(self.queue,shape=(N,K,D),dtype=np.float32,allocator=self.d_mp)
+            #d_rsums = clarray.zeros(self.queue,shape=(N,K,D),dtype=np.float32,allocator=self.d_mp)
 
             #convert to using memory pool
             d_tmpNKRAns = d_lp_nkr_on.copy()
@@ -1200,30 +1200,6 @@ class Gibbs(BaseSampler):
                                        d_rand_z.data,d_rand_r.data,
                                        np.int32(N), np.int32(K), np.int32(D), np.float32(self.T),
                                        np.int32(self.img_w))
-
-
-            # #TODO: include a local memory so the shared normalization only needs to be loaded once from global memory, should be an easy-sh speedup, but need to make sure work group sizes are right...
-            # self.prg.sample_rz_noscOvRP4b(self.queue, (N,K,D), None,
-            #                         d_cur_y, d_cur_z, d_cur_r, d_obj_recon, d_lp_nkr_on, d_lp_nk_off,
-            #                         d_lp_nk_rmax, d_rsums, d_z_col_sum, self.d_obs,
-            #                         d_rand_z, d_rand_r, np.int32(cur_z.shape[0]),
-            #                         np.int32(cur_y.shape[1]), np.int32(cur_y.shape[0]), np.int32(self.img_w),
-            #                          np.float32(self.lam), np.float32(self.epsilon), np.float32(self.theta))
-
-        #    tmpRSums = np.require(np.zeros(shape=(N,K,D), dtype=np.float32), dtype=np.float32, requirements=['C','A'])
-        #    cl.enqueue_copy(self.queue, tmpRSums, d_rsums)
-            #= np.zeros(shape= (cur_z.shape[0], cur_z.shape[1], cur_y.shape[1]), dtype=np.float32)
-            #l.enqueue_copy(self.queue, tmpNKROn, d_lp_nkr_on)
-
-           # self.prg.sample_rz_noscOvRP5(self.queue, (cur_z.shape[0))
-
-
-            # self.prg.sample_rz_noscOvRP5(self.queue, (cur_z.shape[0], cur_z.shape[1]), None,
-            #                         d_cur_y, d_cur_z, d_cur_r, d_obj_recon, d_lp_nkr_on, d_lp_nk_off,
-            #                         d_lp_nk_rmax, d_rsums, d_z_col_sum, self.d_obs,
-            #                         d_rand_z, d_rand_r, np.int32(cur_z.shape[0]),
-            #                         np.int32(cur_y.shape[1]), np.int32(cur_y.shape[0]), np.int32(self.img_w),
-            #                          np.float32(self.lam), np.float32(self.epsilon), np.float32(self.theta))
 
             self.gpu_time += time() - a_time
             #for debuggin gonly:\
