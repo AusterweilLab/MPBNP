@@ -50,7 +50,7 @@ def print_matrix_in_row(npmat, file_dest):
 
 class BaseSampler(object):
 
-    def __init__(self, record_best, cl_mode, cl_device = None):
+    def __init__(self, record_best, cl_mode, cuda_mode = False, cl_device = None):
         """Initialize the class.
         """
         if cl_mode:
@@ -84,6 +84,10 @@ class BaseSampler(object):
             self.device_max_cu = self.device.max_compute_units
             
         self.cl_mode = cl_mode
+        self.cuda_mode = cuda_mode
+
+        assert((self.cl_mode and self.cuda_mode) is not True), "Can't use both OpenCL and CUDA"
+
         self.obs = []
         self.niter = 1000
         self.thining = 1

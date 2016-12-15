@@ -25,12 +25,13 @@ def print_args_summary(args):
 
 parser = argparse.ArgumentParser(description="""
 A test unit for automatically assessing the computation time of the CRP Gaussian Gibbs Sampler with and without OpenCL support.
-Contact Ting Qian <ting_qian@brown.edu> or Joseph Austerweil <Joseph.austerweil@gmail.com for questions and feedback.
+Contact Joseph Austerweil <Joseph.austerweil@gmail.com for questions and feedback.
 """)
 parser.add_argument('--iter', '-t', type=int, default=10000, help='The number of iterations the sampler should run')
 parser.add_argument('--burnin', '-b', type=int, default=2000, help='The number of iterations discarded as burn-in.')
 parser.add_argument('--opencl_device', choices=['ask', 'gpu', 'cpu'], default='ask', help='The device to use OpenCL acceleration on. Default behavior is asking the user (i.e., you).')
 parser.add_argument('--opencl', action='store_true', help='Use OpenCL acceleration')
+parser.add_argument('--cuda', action='store_true', help='Use CUDA acceleration')
 #parser.add_argument('--cluster_size', type=int, required=True,  help='The size of each cluster (for generating data)')
 parser.add_argument('--dim', type=int, default=2, help="dimensionality of the gaussian")
 parser.add_argument('--cluster_num', type=int, required=True, help='The number of clusters (for generating data)')
@@ -44,7 +45,8 @@ print_args_summary(args)
 #c = CRPGaussianCollapsedGibbs(cl_mode = args.opencl)
 
 c = crp.gaussian.CollapsedGibbs(cl_mode = args.opencl,
-                                cl_device=args.opencl_device)
+                                cl_device=args.opencl_device,
+                                cuda_mode=args.cuda)
 
 """if args.opencl:
     device = c.ctx.get_info(cl.context_info.DEVICES)[0]
